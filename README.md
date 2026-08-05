@@ -1,8 +1,8 @@
-# 📅 Pro Timetable Engine
+# 📅 Schedulify - Smart Timetable Generator
 
 **An automated, constraint-based college timetable generator built with Streamlit.**
 
-Pro Timetable Engine takes department data — teachers, subjects, sections, rooms, and teacher preferences — and generates conflict-free weekly timetables for every class, with automated teacher allocation, elective handling, lab batching, and leave adjustment.
+Schedulify - Smart Timetable Generator takes department data — teachers, subjects, sections, rooms, and teacher preferences — and generates conflict-free weekly timetables for every class, with automated teacher allocation, elective handling, lab batching, and leave adjustment.
 
 ---
 
@@ -49,8 +49,8 @@ All data is stored as local CSV files under a `data/` directory (auto-created on
 ### Installation
 
 ```bash
-git clone https://github.com/<your-username>/Pro-Timetable-Engine.git
-cd Pro-Timetable-Engine
+git clone https://github.com/<your-username>/Schedulify-Smart-Timetable-Generator.git
+cd Schedulify-Smart-Timetable-Generator
 pip install -r requirements.txt
 ```
 
@@ -82,8 +82,3 @@ The app will open in your browser at `http://localhost:8501`.
 - **CSV files** — lightweight, database-free persistence
 
 ---
-
-
-## 📄 License
-
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
