@@ -1,0 +1,29 @@
+session_name,batch_year,semester,section,subject_code,l_hours,t_hours,p_hours,is_lab,lab_continuous_slots,elective_group
+2025-26-even,2023,6,A,CD,3,0,0,False,2,
+2025-26-even,2023,6,A,AI,3,0,0,False,2,
+2025-26-even,2023,6,A,CC,3,0,0,False,2,
+2025-26-even,2023,6,A,SPM,3,0,0,False,2,Elective - III
+2025-26-even,2023,6,A,DS,3,0,0,False,2,Elective - III
+2025-26-even,2023,6,A,ML,3,0,0,False,2,Elective - III
+2025-26-even,2023,6,A,WC,3,0,0,False,2,Open Elective - I
+2025-26-even,2023,6,A,WS,3,0,0,False,2,Open Elective - I
+2025-26-even,2023,6,A,CD LAB,0,0,2,True,2,
+2025-26-even,2023,6,A,AI LAB,0,0,2,True,2,
+2025-26-even,2023,6,A,CC LAB,0,0,2,True,2,
+2025-26-even,2023,6,A,SPM LAB,0,0,2,True,2,Elective - III Lab
+2025-26-even,2023,6,A,DS LAB,0,0,2,True,2,Elective - III Lab
+2025-26-even,2023,6,A,ML LAB,0,0,2,True,2,Elective - III Lab
+2025-26-even,2023,6,B,CD,3,0,0,False,2,
+2025-26-even,2023,6,B,AI,3,0,0,False,2,
+2025-26-even,2023,6,B,CC,3,0,0,False,2,
+2025-26-even,2023,6,B,SPM,3,0,0,False,2,Elective - III
+2025-26-even,2023,6,B,DS,3,0,0,False,2,Elective - III
+2025-26-even,2023,6,B,ML,3,0,0,False,2,Elective - III
+2025-26-even,2023,6,B,WC,3,0,0,False,2,Open Elective - I
+2025-26-even,2023,6,B,WS,3,0,0,False,2,Open Elective - I
+2025-26-even,2023,6,B,CD LAB,0,0,2,True,2,
+2025-26-even,2023,6,B,AI LAB,0,0,2,True,2,
+2025-26-even,2023,6,B,CC LAB,0,0,2,True,2,
+2025-26-even,2023,6,B,SPM LAB,0,0,2,True,2,Elective - III Lab
+2025-26-even,2023,6,B,DS LAB,0,0,2,True,2,Elective - III Lab
+2025-26-even,2023,6,B,ML LAB,0,0,2,True,2,Elective - III Lab
