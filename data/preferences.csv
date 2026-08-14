@@ -1,0 +1,36 @@
+session_name,teacher_code,subject_code,preference_order
+2025-26-even,HB,OS,1
+2025-26-even,SV,COA,1
+2025-26-even,SV,COA LAB,2
+2025-26-even,SV,EVS,3
+2025-26-even,PK,OS,1
+2025-26-even,PK,OS LAB,2
+2025-26-even,HB,OS LAB,2
+2025-26-even,SB,OS LAB,2
+2025-26-even,VC,DAA,1
+2025-26-even,VC,DS,1
+2025-26-even,VC,DS LAB,2
+2025-26-even,VC,DAA LAB,2
+2025-26-even,SH,CC LAB,2
+2025-26-even,SH,CC,1
+2025-26-even,KA,AI,1
+2025-26-even,KA,AI LAB,2
+2025-26-even,CST,CD LAB,2
+2025-26-even,CST,CD,1
+2025-26-even,VM,DAA LAB,2
+2025-26-even,VM,SPM,1
+2025-26-even,VM,SPM LAB,2
+2025-26-even,VM,UHV,2
+2025-26-even,KS,PROJECT,4
+2025-26-even,RK,DAA,1
+2025-26-even,RK,DAA LAB,2
+2025-26-even,SB,OS,1
+2025-26-even,SB,OS LAB,2
+2025-26-even,SB,UHV,2
+2025-26-even,NSR,ML LAB,2
+2025-26-even,NSR,ML,1
+2025-26-even,RS,Maths,1
+2025-26-even,NS,Maths,1
+2025-26-even,AM,WC,1
+2025-26-even,MB,WS,1
+2025-26-even,BS,EVS,1
