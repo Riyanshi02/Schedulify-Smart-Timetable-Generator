@@ -2,25 +2,106 @@ import streamlit as st
 import pandas as pd
 from pathlib import Path
 import copy
+import io
 
-st.set_page_config(
-    page_title="Pro Timetable Engine",
-    page_icon="📅",
-    layout="wide"
-)
+# ==========================================
+# 📅 PAGE CONFIG & THEME
+# ==========================================
+st.set_page_config(page_title="Schedulify - Smart Timetable Generator ", page_icon="📅", layout="wide")
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 
 
+def apply_custom_theme():
+    st.markdown("""
+    <style>
+    .stApp {
+        background: linear-gradient(135deg, #f8fafc 0%, #fdf2f8 50%, #eef2ff 100%);
+        color: #1f2937;
+    }
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #4c1d95 0%, #6d28d9 45%, #db2777 100%);
+        color: white;
+    }
+    section[data-testid="stSidebar"] * { color: white !important; }
+    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+    h1, h2, h3 { color: #7e22ce; font-weight: 800; }
+    div[data-testid="stMetric"] {
+        background: rgba(255,255,255,0.82);
+        border-radius: 18px; padding: 18px;
+        box-shadow: 0 8px 25px rgba(0,0,0,0.08);
+        border: 1px solid rgba(255,255,255,0.7);
+    }
+    div.stButton > button {
+        background: linear-gradient(90deg, #9333ea 0%, #db2777 100%);
+        color: white; border: none; border-radius: 12px;
+        font-weight: 700; padding: 0.6rem 1.2rem;
+        box-shadow: 0 6px 18px rgba(147,51,234,0.35);
+    }
+    div.stButton > button:hover {
+        background: linear-gradient(90deg, #7e22ce 0%, #be185d 100%);
+    }
+    .stDataFrame, .stTable {
+        background: rgba(255,255,255,0.88);
+        border-radius: 18px; padding: 8px;
+        box-shadow: 0 8px 25px rgba(0,0,0,0.06);
+    }
+    div[data-baseweb="input"], div[data-baseweb="select"], textarea {
+        background: rgba(255,255,255,0.94) !important;
+        border-radius: 12px !important;
+    }
+    .stAlert { border-radius: 14px; }
+    .main-card {
+        background: rgba(255,255,255,0.75);
+        padding: 2.5rem; border-radius: 28px;
+        box-shadow: 0 12px 40px rgba(0,0,0,0.09);
+        backdrop-filter: blur(12px);
+    }
+    .hero-title {
+        font-size: 4.2rem; font-weight: 900; text-align: center;
+        margin-bottom: 0.3rem;
+        background: linear-gradient(90deg, #7c3aed, #db2777, #60a5fa);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .hero-subtitle {
+        text-align: center; font-size: 1.25rem; color: #6b7280; margin-top: 0.3rem;
+    }
+    .hero-badge {
+        display: inline-block; padding: 0.6rem 1.4rem; border-radius: 999px;
+        background: rgba(255,255,255,0.82); box-shadow: 0 8px 25px rgba(0,0,0,0.08);
+        color: #9333ea; font-weight: 700; margin-bottom: 1.2rem;
+    }
+    .feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-top: 1rem; }
+    .feature-card {
+        background: rgba(255,255,255,0.78); padding: 1.2rem; border-radius: 16px;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.06); border-left: 4px solid #9333ea;
+    }
+    .timetable-cell { padding: 8px; border-radius: 8px; margin: 4px 0; font-size: 0.9rem; line-height: 1.4; }
+    .cell-theory { background: #dbeafe; color: #1e40af; }
+    .cell-lab { background: #dcfce7; color: #166534; }
+    .cell-tutorial { background: #ffedd5; color: #9a3412; }
+    .cell-elective { background: #f3e8ff; color: #6b21a8; }
+    .cell-lunch { background: #f3f4f6; color: #4b5563; font-style: italic; }
+    .cell-empty { background: #ffffff; color: #9ca3af; }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+apply_custom_theme()
+
 # ==========================================
-# 1. UTILITY & DATA LOADING
+# 1. DATA UTILITIES
 # ==========================================
 def load_csv(file_name, columns):
     file_path = DATA_DIR / file_name
     if file_path.exists():
         try:
-            return pd.read_csv(file_path)
+            df = pd.read_csv(file_path)
+            for col in columns:
+                if col not in df.columns:
+                    df[col] = ""
+            return df[columns]
         except pd.errors.EmptyDataError:
             return pd.DataFrame(columns=columns)
     return pd.DataFrame(columns=columns)
@@ -30,63 +111,61 @@ def save_csv(df, file_name):
     df.to_csv(DATA_DIR / file_name, index=False)
 
 
+def is_duplicate(df, column, value):
+    return value.strip().upper() in df[column].astype(str).str.upper().values
+
+
+def is_duplicate_row(df, criteria: dict):
+    if df.empty:
+        return False
+    mask = pd.Series([True] * len(df))
+    for col, val in criteria.items():
+        if col not in df.columns:
+            return False
+        mask &= df[col].astype(str).str.strip().str.upper() == str(val).strip().upper()
+    return mask.any()
+
+
 def init_data():
-    teachers = load_csv("teachers.csv", [
-        "teacher_code", "teacher_name", "short_name", "department"
-    ])
-    subjects = load_csv("subjects.csv", [
-        "subject_code", "subject_name", "subject_type",
-        "l_hours", "t_hours", "p_hours",
-        "requires_lab_room", "continuous_slots_required"
-    ])
-    classes = load_csv("classes.csv", [
-        "session_name", "batch_year", "semester", "section", "program", "strength"
-    ])
-    rooms = load_csv("rooms.csv", [
-        "room_name", "room_type", "capacity"
-    ])
-    preferences = load_csv("preferences.csv", [
-        "session_name", "teacher_code", "subject_code", "preference_order"
-    ])
-    class_subjects = load_csv("class_subjects.csv", [
-        "session_name", "batch_year", "semester", "section",
-        "subject_code", "l_hours", "t_hours", "p_hours",
-        "is_lab", "lab_continuous_slots", "elective_group"
-    ])
+    teachers = load_csv("teachers.csv", ["teacher_code", "teacher_name", "department"])
+    subjects = load_csv("subjects.csv", ["subject_code", "subject_name", "subject_type",
+                                         "l_hours", "t_hours", "p_hours",
+                                         "requires_lab_room", "continuous_slots_required"])
+    classes = load_csv("classes.csv", ["session_name", "batch_year", "semester", "section", "program", "strength"])
+    rooms = load_csv("rooms.csv", ["room_name", "room_type", "capacity"])
+    preferences = load_csv("preferences.csv", ["session_name", "teacher_code", "subject_code", "preference_order"])
+    class_subjects = load_csv("class_subjects.csv", ["session_name", "batch_year", "semester", "section",
+                                                     "subject_code", "l_hours", "t_hours", "p_hours",
+                                                     "is_lab", "lab_continuous_slots", "elective_group"])
     return teachers, subjects, classes, rooms, preferences, class_subjects
 
 
 teachers_df, subjects_df, classes_df, rooms_df, preferences_df, class_subjects_df = init_data()
 
+# Clean legacy short_name if exists
+if "short_name" in teachers_df.columns:
+    teachers_df = teachers_df.drop(columns=["short_name"])
+    save_csv(teachers_df, "teachers.csv")
 
 # ==========================================
 # 2. SESSION STATE
 # ==========================================
-if "timetable" not in st.session_state:
-    st.session_state["timetable"] = None
-if "allocations" not in st.session_state:
-    st.session_state["allocations"] = None
-if "unscheduled" not in st.session_state:
-    st.session_state["unscheduled"] = []
-if "base_timetable" not in st.session_state:
-    st.session_state["base_timetable"] = None
+for key in ["timetable", "allocations", "unscheduled", "base_timetable"]:
+    if key not in st.session_state:
+        st.session_state[key] = None if key != "unscheduled" else []
 
-# Edit state flags
-for key in [
-    "edit_teacher_idx", "edit_subject_idx", "edit_class_idx",
-    "edit_room_idx", "edit_pref_idx", "edit_cs_idx"
-]:
+for key in ["edit_teacher_idx", "edit_subject_idx", "edit_class_idx",
+            "edit_room_idx", "edit_pref_idx", "edit_cs_idx"]:
     if key not in st.session_state:
         st.session_state[key] = None
-
 
 # ==========================================
 # 3. TEACHER ALLOCATION ENGINE
 # ==========================================
 def allocate_teachers(session, class_subjects_df, preferences_df, teachers_df):
     allocations = []
-    teacher_load = {teacher: 0 for teacher in teachers_df["teacher_code"].tolist()}
-    MAX_HOURS_PER_TEACHER = 24
+    teacher_load = {t: 0 for t in teachers_df["teacher_code"].tolist()}
+    MAX_HOURS = 24
 
     session_subjects = class_subjects_df[class_subjects_df["session_name"] == session]
     session_prefs = preferences_df[preferences_df["session_name"] == session]
@@ -94,50 +173,33 @@ def allocate_teachers(session, class_subjects_df, preferences_df, teachers_df):
     for _, row in session_subjects.iterrows():
         class_key = f"{int(row['semester'])} Sem - {row['section']}"
         subject_code = row["subject_code"]
-
-        l_hrs = int(row["l_hours"])
-        t_hrs = int(row["t_hours"])
-        p_hrs = int(row["p_hours"])
+        l_hrs, t_hrs, p_hrs = int(row["l_hours"]), int(row["t_hours"]), int(row["p_hours"])
         total_hours = l_hrs + (t_hrs * 2) + (p_hrs * 2)
-
         elective_group = row["elective_group"] if "elective_group" in row else ""
 
-        interested_teachers = session_prefs[
-            session_prefs["subject_code"] == subject_code
-        ].sort_values(by="preference_order")
-
-        allocated_teacher = None
-        for _, pref_row in interested_teachers.iterrows():
-            tc = pref_row["teacher_code"]
-            if tc in teacher_load and teacher_load[tc] + total_hours <= MAX_HOURS_PER_TEACHER:
-                allocated_teacher = tc
+        interested = session_prefs[session_prefs["subject_code"] == subject_code].sort_values("preference_order")
+        allocated = None
+        for _, pref in interested.iterrows():
+            tc = pref["teacher_code"]
+            if tc in teacher_load and teacher_load[tc] + total_hours <= MAX_HOURS:
+                allocated = tc
                 teacher_load[tc] += total_hours
-                allocations.append({
-                    "semester": int(row["semester"]),
-                    "class": class_key,
-                    "subject_code": subject_code,
-                    "teacher_code": allocated_teacher,
-                    "l_hours": l_hrs,
-                    "t_hours": t_hrs,
-                    "p_hours": p_hrs,
-                    "elective_group": elective_group if pd.notna(elective_group) else ""
-                })
                 break
 
-        if not allocated_teacher:
-            allocations.append({
-                "semester": int(row["semester"]),
-                "class": class_key,
-                "subject_code": subject_code,
-                "teacher_code": "UNALLOCATED",
-                "l_hours": l_hrs,
-                "t_hours": t_hrs,
-                "p_hours": p_hrs,
-                "elective_group": elective_group if pd.notna(elective_group) else ""
-            })
+        allocations.append({
+            "semester": int(row["semester"]),
+            "class": class_key,
+            "subject_code": subject_code,
+            "teacher_code": allocated or "UNALLOCATED",
+            "l_hours": l_hrs,
+            "t_hours": t_hrs,
+            "p_hours": p_hrs,
+            "is_lab": bool(row["is_lab"]) if "is_lab" in row else False,
+            "lab_continuous_slots": int(row["lab_continuous_slots"]) if "lab_continuous_slots" in row and pd.notna(row["lab_continuous_slots"]) else 1,
+            "elective_group": elective_group if pd.notna(elective_group) else ""
+        })
 
     return pd.DataFrame(allocations), teacher_load
-
 
 # ==========================================
 # 4. TIMETABLE GENERATION ENGINE
@@ -145,1351 +207,1087 @@ def allocate_teachers(session, class_subjects_df, preferences_df, teachers_df):
 def generate_schedule(allocations_df, subjects_df, rooms_df):
     days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
     slot_labels = {
-        1: "09:00",
-        2: "09:55",
-        3: "10:50",
-        4: "11:45",
-        5: "12:40 (LUNCH)",
-        6: "13:35",
-        7: "14:30",
-        8: "15:25"
+        1: "09:00", 2: "09:55", 3: "10:50", 4: "11:45",
+        5: "12:40 (LUNCH)", 6: "13:35", 7: "14:30", 8: "15:25"
     }
     slots = list(slot_labels.keys())
-    lunch_slot = 5
+    lunch = 5
 
-    teacher_busy = set()
-    room_busy = set()
-    class_busy_g1 = set()
-    class_busy_g2 = set()
+    teacher_busy, room_busy = set(), set()
+    class_busy_g1, class_busy_g2 = set(), set()
     class_subject_day = set()
 
-    all_classes = allocations_df["class"].unique()
-
-    # Soft constraint trackers
+    all_classes = allocations_df["class"].unique() if not allocations_df.empty else []
     class_daily_load = {c: {d: 0 for d in days} for c in all_classes}
     teacher_daily_load = {
         t: {d: 0 for d in days}
         for t in allocations_df["teacher_code"].unique()
         if t != "UNALLOCATED"
-    }
+    } if not allocations_df.empty else {}
 
     all_timetables = {}
-    for class_key in all_classes:
-        timetable_df = pd.DataFrame(
-            "", index=days, columns=[slot_labels[s] for s in slots]
-        )
+    for c in all_classes:
+        df = pd.DataFrame("", index=days, columns=[slot_labels[s] for s in slots])
+        for d in days:
+            df.loc[d, slot_labels[lunch]] = "LUNCH"
+        all_timetables[c] = df
+
+    unscheduled = []
+
+    def append_cell(existing, new):
+        return new if not existing or pd.isna(existing) else f"{existing}\n---\n{new}"
+
+    def find_paired_g1g2(class_key, teacher, duration, room_type, avoid=None):
+        best_score, best = float("inf"), None
         for day in days:
-            timetable_df.loc[day, slot_labels[lunch_slot]] = "LUNCH"
-        all_timetables[class_key] = timetable_df
+            if avoid and (class_key, avoid, day) in class_subject_day:
+                continue
+            for start in range(1, max(slots) + 1):
+                if start == lunch:
+                    continue
+                b1 = list(range(start, start + duration))
+                b2 = list(range(start + duration, start + 2 * duration))
+                if any(s > max(slots) or s == lunch for s in b1 + b2):
+                    continue
+                if any((class_key, day, s) in class_busy_g1 or (class_key, day, s) in class_busy_g2 for s in b1 + b2):
+                    continue
+                if any((teacher, day, s) in teacher_busy for s in b1 + b2):
+                    continue
 
-    unscheduled_lectures = []
+                avail = [
+                    r for r in rooms_df[rooms_df["room_type"] == room_type]["room_name"].tolist()
+                    if all((r, day, s) not in room_busy for s in b1 + b2)
+                ]
+                if len(avail) < 2:
+                    continue
 
-    def append_cell(existing, new_val):
-        if existing == "" or pd.isna(existing):
-            return new_val
-        return f"{existing}\n---\n{new_val}"
+                score = start * 8
 
-    def check_gap_penalty(busy_set, entity, day, slot):
-        """Returns penalty score if placing here creates a gap."""
-        if slot <= 1:
-            return 0
-        prev_slot = slot - 1
-        if prev_slot == lunch_slot:
-            prev_slot = slot - 2
-        if prev_slot < 1:
-            return 0
-        if (entity, day, prev_slot) not in busy_set:
-            return 50
-        return 0
+                existing_slots = sorted(list(set(
+                    [s for (cc, dd, s) in class_busy_g1 if cc == class_key and dd == day] +
+                    [s for (cc, dd, s) in class_busy_g2 if cc == class_key and dd == day]
+                )))
 
-    def find_best_slot(
-        class_keys, teacher_codes, duration, room_type,
-        is_g1=True, is_g2=True, avoid_subject=None
-    ):
-        best_score = float("inf")
-        best_placement = None
-        allow_same_day = False
+                if existing_slots:
+                    nearest_distance = min(min(abs(s - ex) for ex in existing_slots) for s in b1 + b2)
+                    score += nearest_distance * 15
 
-        for attempt in range(2):
-            for day in days:
-                if not allow_same_day and avoid_subject:
-                    if any(
-                        (c, avoid_subject, day) in class_subject_day
-                        for c in class_keys
-                    ):
-                        continue
+                    block_min = min(b1 + b2)
+                    block_max = max(b1 + b2)
 
-                for slot in slots:
-                    if slot == lunch_slot:
-                        continue
-                    check_slots = list(range(slot, slot + duration))
-                    if any(s > max(slots) or s == lunch_slot for s in check_slots):
-                        continue
+                    if block_min < min(existing_slots):
+                        score += (min(existing_slots) - block_min) * 10
+                    elif block_max > max(existing_slots):
+                        score += (block_max - max(existing_slots)) * 4
 
-                    is_feasible = True
+                score += class_daily_load[class_key][day] * 12
 
-                    # Hard: Check class availability
-                    for c in class_keys:
-                        for s in check_slots:
-                            if is_g1 and (c, day, s) in class_busy_g1:
-                                is_feasible = False
-                                break
-                            if is_g2 and (c, day, s) in class_busy_g2:
-                                is_feasible = False
-                                break
-                        if not is_feasible:
-                            break
-                    if not is_feasible:
-                        continue
+                if room_type == "LAB" and start < lunch:
+                    score += 20
+                if room_type == "CLASSROOM" and start > lunch:
+                    score += 10
 
-                    # Hard: Check teacher availability
-                    for t in teacher_codes:
-                        if any((t, day, s) in teacher_busy for s in check_slots):
-                            is_feasible = False
-                            break
-                    if not is_feasible:
-                        continue
+                if score < best_score:
+                    best_score, best = score, (day, b1, b2, avail[:2])
+        return best
 
-                    # Hard: Check room availability
-                    req_rooms = len(teacher_codes)
-                    avail_rooms = [
-                        r for r in
-                        rooms_df[rooms_df["room_type"] == room_type]["room_name"].tolist()
-                        if all((r, day, s) not in room_busy for s in check_slots)
-                    ]
-                    if len(avail_rooms) < req_rooms:
-                        continue
-                    assigned_rooms = avail_rooms[:req_rooms]
+    def find_single_slot(class_keys, teachers, duration, room_type, is_g1=True, is_g2=True, avoid=None):
+        best_score, best = float("inf"), None
+        for day in days:
+            if avoid and any((c, avoid, day) in class_subject_day for c in class_keys):
+                continue
+            for slot in slots:
+                if slot == lunch:
+                    continue
+                check = list(range(slot, slot + duration))
+                if any(s > max(slots) or s == lunch for s in check):
+                    continue
+                if any((c, day, s) in class_busy_g1 for c in class_keys for s in check if is_g1):
+                    continue
+                if any((c, day, s) in class_busy_g2 for c in class_keys for s in check if is_g2):
+                    continue
+                if any((t, day, s) in teacher_busy for t in teachers for s in check):
+                    continue
 
-                    # Soft: Score calculation
-                    score = slot * 5  # Prefer early slots
+                avail = [
+                    r for r in rooms_df[rooms_df["room_type"] == room_type]["room_name"].tolist()
+                    if all((r, day, s) not in room_busy for s in check)
+                ]
+                if len(avail) < len(teachers):
+                    continue
 
-                    # Soft: Even distribution across week
-                    for c in class_keys:
-                        score += class_daily_load[c][day] * 10
-                        if class_daily_load[c][day] >= 5:
-                            score += 100  # Too many in one day
-                        score += check_gap_penalty(class_busy_g1, c, day, slot)
+                score = slot * 8
 
-                    for t in teacher_codes:
-                        if t in teacher_daily_load:
-                            score += teacher_daily_load[t][day] * 10
-                            if teacher_daily_load[t][day] >= 4:
-                                score += 100
+                for c in class_keys:
+                    current_day_slots_g1 = sorted([s for (cc, dd, s) in class_busy_g1 if cc == c and dd == day])
+                    current_day_slots_g2 = sorted([s for (cc, dd, s) in class_busy_g2 if cc == c and dd == day])
+                    existing_slots = sorted(list(set(current_day_slots_g1 + current_day_slots_g2)))
 
-                    # Soft: Labs prefer afternoon
-                    if room_type == "LAB" and slot < lunch_slot:
-                        score += 15
-                    # Soft: Theory prefers morning
-                    if room_type == "CLASSROOM" and slot > lunch_slot:
-                        score += 5
+                    score += class_daily_load[c][day] * 12
+                    if class_daily_load[c][day] >= 5:
+                        score += 100
 
-                    if score < best_score:
-                        best_score = score
-                        best_placement = (day, check_slots, assigned_rooms)
+                    if existing_slots:
+                        nearest_distance = min(abs(slot - ex) for ex in existing_slots)
+                        score += nearest_distance * 15
 
-            if best_placement:
-                break
-            allow_same_day = True
+                        if slot < min(existing_slots):
+                            score += (min(existing_slots) - slot) * 10
+                        elif slot > max(existing_slots):
+                            score += (slot - max(existing_slots)) * 4
 
-        return best_placement
+                for t in teachers:
+                    if t in teacher_daily_load:
+                        score += teacher_daily_load[t][day] * 10
+                        if teacher_daily_load[t][day] >= 4:
+                            score += 100
 
-    def commit_placement(
-        class_keys, teacher_codes, day, chosen_slots,
-        chosen_rooms, cell_texts, is_g1=True, is_g2=True
-    ):
-        for s in chosen_slots:
+                if room_type == "LAB" and slot < lunch:
+                    score += 20
+                if room_type == "CLASSROOM" and slot > lunch:
+                    score += 10
+
+                if score < best_score:
+                    best_score, best = score, (day, check, avail[:len(teachers)])
+        return best
+
+    def commit(classes, teachers, day, slots_list, rooms, texts, g1=True, g2=True):
+        for s in slots_list:
             col = slot_labels[s]
-            for i, c in enumerate(class_keys):
-                txt = cell_texts[i] if i < len(cell_texts) else cell_texts[0]
-                all_timetables[c].loc[day, col] = append_cell(
-                    all_timetables[c].loc[day, col], txt
-                )
-                if is_g1:
+            for i, c in enumerate(classes):
+                txt = texts[i] if i < len(texts) else texts[0]
+                all_timetables[c].loc[day, col] = append_cell(all_timetables[c].loc[day, col], txt)
+                if g1:
                     class_busy_g1.add((c, day, s))
-                if is_g2:
+                if g2:
                     class_busy_g2.add((c, day, s))
-
-            for i, t in enumerate(teacher_codes):
+            for t in teachers:
                 teacher_busy.add((t, day, s))
-            for i, r in enumerate(chosen_rooms):
+            for r in rooms:
                 room_busy.add((r, day, s))
 
-        for c in class_keys:
-            class_daily_load[c][day] += len(chosen_slots)
-        for t in teacher_codes:
+        for c in classes:
+            class_daily_load[c][day] += len(slots_list)
+        for t in teachers:
             if t in teacher_daily_load:
-                teacher_daily_load[t][day] += len(chosen_slots)
+                teacher_daily_load[t][day] += len(slots_list)
 
-    # -----------------------------------------------
-    # CROSS-SECTION ELECTIVE SCHEDULING (Goes First)
-    # -----------------------------------------------
-    def schedule_cross_section_electives(semester, group_name, group_rows):
-        classes_inv = group_rows["class"].unique().tolist()
-        offerings = group_rows[
-            ["subject_code", "teacher_code"]
-        ].drop_duplicates().to_dict("records")
+    def schedule_electives(semester, group, rows):
+        classes_inv = rows["class"].unique().tolist()
+        offerings = rows[["subject_code", "teacher_code"]].drop_duplicates().to_dict("records")
         teachers_inv = [o["teacher_code"] for o in offerings]
 
         if any(t == "UNALLOCATED" for t in teachers_inv):
-            unscheduled_lectures.append(
-                f"Elective {group_name}: Unallocated teachers."
-            )
+            unscheduled.append(f"Elective {group}: Unallocated teachers.")
             return
 
-        for s_type, hrs_col in [("L", "l_hours"), ("T", "t_hours"), ("P", "p_hours")]:
-            hrs = int(group_rows.iloc[0][hrs_col])
+        for stype, hcol in [("L", "l_hours"), ("T", "t_hours"), ("P", "p_hours")]:
+            hrs = int(rows.iloc[0][hcol])
             if hrs == 0:
                 continue
 
-            sub_info_match = subjects_df[
-                subjects_df["subject_code"] == offerings[0]["subject_code"]
-            ]
-            if sub_info_match.empty:
-                continue
-            sub_info = sub_info_match.iloc[0]
-            r_type = "LAB" if sub_info["subject_type"] == "LAB" else "CLASSROOM"
-            duration = hrs if s_type == "P" else 1
-            to_schedule = 1 if s_type == "P" else hrs
+            need_lab, max_dur = False, 1
+            for o in offerings:
+                sm = subjects_df[subjects_df["subject_code"] == o["subject_code"]]
+                if not sm.empty:
+                    sr = sm.iloc[0]
+                    if str(sr.get("subject_type", "")).upper() == "LAB" or bool(sr.get("requires_lab_room", False)) or bool(rows.iloc[0].get("is_lab", False)):
+                        need_lab = True
+                    max_dur = max(max_dur, int(sr.get("continuous_slots_required", 1)))
 
-            for _ in range(to_schedule):
-                placement = find_best_slot(
-                    classes_inv, teachers_inv, duration, r_type,
-                    is_g1=True, is_g2=True
-                )
-                if placement:
-                    day, chosen_slots, chosen_rooms = placement
-                    block_lines = [
-                        f"{o['subject_code']}-{s_type} ({o['teacher_code']}) [{chosen_rooms[i]}]"
-                        for i, o in enumerate(offerings)
-                    ]
-                    block_text = "=== Electives ===\n" + "\n".join(block_lines)
+            rtype = "LAB" if (stype == "P" and need_lab) else "CLASSROOM"
+            dur = int(rows.iloc[0].get("lab_continuous_slots", max_dur)) if stype == "P" else 1
+            if dur < 1:
+                dur = 1
+            to_sched = 1 if stype == "P" else hrs
 
-                    cell_texts = [block_text for _ in classes_inv]
-                    commit_placement(
-                        classes_inv, teachers_inv, day, chosen_slots,
-                        chosen_rooms, cell_texts, is_g1=True, is_g2=True
-                    )
+            for _ in range(to_sched):
+                p = find_single_slot(classes_inv, teachers_inv, dur, rtype, True, True)
+                if p:
+                    day, ch_slots, ch_rooms = p
+                    lines = [f"{o['subject_code']}-{stype} ({o['teacher_code']}) [{ch_rooms[i]}]" for i, o in enumerate(offerings)]
+                    txt = "=== Electives ===\n" + "\n".join(lines)
+                    commit(classes_inv, teachers_inv, day, ch_slots, ch_rooms, [txt] * len(classes_inv), True, True)
                     for c in classes_inv:
-                        class_subject_day.add((c, f"ELEC_{group_name}", day))
+                        class_subject_day.add((c, f"ELEC_{group}", day))
                 else:
-                    unscheduled_lectures.append(
-                        f"Elective {group_name}-{s_type}: Could not schedule."
-                    )
+                    unscheduled.append(f"Elective {group}-{stype}: Could not schedule.")
 
-    # -----------------------------------------------
-    # NORMAL SUBJECT SCHEDULING
-    # -----------------------------------------------
-    def schedule_normal_subject(row, sub_info):
-        c = row["class"]
-        sub = row["subject_code"]
-        tc = row["teacher_code"]
-
+    def schedule_normal(row, sub_info):
+        c, sub, tc = row["class"], row["subject_code"], row["teacher_code"]
         if tc == "UNALLOCATED":
             return
 
-        # L (Theory) -> Both G1 and G2
         for _ in range(int(row["l_hours"])):
-            placement = find_best_slot(
-                [c], [tc], 1, "CLASSROOM",
-                is_g1=True, is_g2=True, avoid_subject=sub
-            )
-            if placement:
-                day, chosen_slots, chosen_rooms = placement
-                cell_text = f"{sub}-L\n({tc})\n{chosen_rooms[0]}"
-                commit_placement(
-                    [c], [tc], day, chosen_slots, chosen_rooms,
-                    [cell_text], is_g1=True, is_g2=True
-                )
+            p = find_single_slot([c], [tc], 1, "CLASSROOM", True, True, sub)
+            if p:
+                day, sl, rm = p
+                commit([c], [tc], day, sl, rm, [f"{sub}-L\n({tc})\n{rm[0]}"], True, True)
                 class_subject_day.add((c, sub, day))
             else:
-                unscheduled_lectures.append(f"{c}: {sub}-L could not be scheduled.")
+                unscheduled.append(f"{c}: {sub}-L unscheduled.")
 
-        # T (Tutorial) -> Split G1 and G2 separately
         if int(row["t_hours"]) > 0:
-            for group, g1_flag, g2_flag in [("G1", True, False), ("G2", False, True)]:
-                for _ in range(int(row["t_hours"])):
-                    placement = find_best_slot(
-                        [c], [tc], 1, "CLASSROOM",
-                        is_g1=g1_flag, is_g2=g2_flag
-                    )
-                    if placement:
-                        day, chosen_slots, chosen_rooms = placement
-                        cell_text = f"{sub}-T({group})\n({tc})\n{chosen_rooms[0]}"
-                        commit_placement(
-                            [c], [tc], day, chosen_slots, chosen_rooms,
-                            [cell_text], is_g1=g1_flag, is_g2=g2_flag
-                        )
-                    else:
-                        unscheduled_lectures.append(
-                            f"{c}: {sub}-T({group}) could not be scheduled."
-                        )
+            paired = find_paired_g1g2(c, tc, 1, "CLASSROOM", sub)
+            if paired:
+                day, b1, b2, rms = paired
+                commit([c], [tc], day, b1, [rms[0]], [f"{sub}-T(G1)\n({tc})\n{rms[0]}"], True, False)
+                commit([c], [tc], day, b2, [rms[1]], [f"{sub}-T(G2)\n({tc})\n{rms[1]}"], False, True)
+            else:
+                for g, g1f, g2f in [("G1", True, False), ("G2", False, True)]:
+                    for _ in range(int(row["t_hours"])):
+                        p = find_single_slot([c], [tc], 1, "CLASSROOM", g1f, g2f)
+                        if p:
+                            day, sl, rm = p
+                            commit([c], [tc], day, sl, rm, [f"{sub}-T({g})\n({tc})\n{rm[0]}"], g1f, g2f)
+                        else:
+                            unscheduled.append(f"{c}: {sub}-T({g}) unscheduled.")
 
-        # P (Practical/Lab) -> Split G1 and G2 separately
         if int(row["p_hours"]) > 0:
-            r_type = "LAB" if sub_info["subject_type"] == "LAB" else "CLASSROOM"
-            duration = int(sub_info["continuous_slots_required"])
-            if duration < 1:
-                duration = 1
+            rtype = "LAB" if (
+                str(sub_info.get("subject_type", "")).upper() == "LAB"
+                or bool(sub_info.get("requires_lab_room", False))
+                or bool(row.get("is_lab", False))
+            ) else "CLASSROOM"
+            dur = int(row.get("lab_continuous_slots", sub_info.get("continuous_slots_required", 1)))
+            if dur < 1:
+                dur = 1
+            paired = find_paired_g1g2(c, tc, dur, rtype)
+            if paired:
+                day, b1, b2, rms = paired
+                commit([c], [tc], day, b1, [rms[0]], [f"{sub}-P(G1)\n({tc})\n{rms[0]}"], True, False)
+                commit([c], [tc], day, b2, [rms[1]], [f"{sub}-P(G2)\n({tc})\n{rms[1]}"], False, True)
+            else:
+                for g, g1f, g2f in [("G1", True, False), ("G2", False, True)]:
+                    p = find_single_slot([c], [tc], dur, rtype, g1f, g2f)
+                    if p:
+                        day, sl, rm = p
+                        commit([c], [tc], day, sl, rm, [f"{sub}-P({g})\n({tc})\n{rm[0]}"], g1f, g2f)
+                    else:
+                        unscheduled.append(f"{c}: {sub}-P({g}) unscheduled.")
 
-            for group, g1_flag, g2_flag in [("G1", True, False), ("G2", False, True)]:
-                placement = find_best_slot(
-                    [c], [tc], duration, r_type,
-                    is_g1=g1_flag, is_g2=g2_flag
-                )
-                if placement:
-                    day, chosen_slots, chosen_rooms = placement
-                    cell_text = f"{sub}-P({group})\n({tc})\n{chosen_rooms[0]}"
-                    commit_placement(
-                        [c], [tc], day, chosen_slots, chosen_rooms,
-                        [cell_text], is_g1=g1_flag, is_g2=g2_flag
-                    )
-                else:
-                    unscheduled_lectures.append(
-                        f"{c}: {sub}-P({group}) could not be scheduled."
-                    )
-
-    # -----------------------------------------------
-    # EXECUTION ORDER
-    # -----------------------------------------------
     if not allocations_df.empty:
-        allocations_df = allocations_df.sample(frac=1).reset_index(drop=True)
+        allocations_df = allocations_df.copy()
+        allocations_df["total_load"] = (
+            allocations_df["l_hours"].fillna(0).astype(int)
+            + allocations_df["t_hours"].fillna(0).astype(int)
+            + allocations_df["p_hours"].fillna(0).astype(int)
+        )
+        allocations_df["priority"] = allocations_df.apply(
+            lambda r: (
+                0 if str(r.get("elective_group", "")).strip() else 1,
+                0 if int(r.get("p_hours", 0)) > 0 else 1,
+                -int(r.get("lab_continuous_slots", 1)),
+                -int(r["total_load"])
+            ),
+            axis=1
+        )
+        allocations_df = allocations_df.sort_values("priority").drop(columns=["total_load", "priority"]).reset_index(drop=True)
 
-    normal_rows = []
-    elective_rows = []
+    elec_rows, norm_rows = [], []
+    for _, r in allocations_df.iterrows():
+        eg = str(r.get("elective_group", "")).strip()
+        (elec_rows if eg else norm_rows).append(r)
 
-    for _, row in allocations_df.iterrows():
-        eg = str(row.get("elective_group", "")).strip()
-        if eg != "":
-            elective_rows.append(row)
-        else:
-            normal_rows.append(row)
-
-    # Step 1: Schedule electives first
-    elective_df = pd.DataFrame(elective_rows) if elective_rows else pd.DataFrame()
-    if not elective_df.empty:
-        for (semester, group_name), group_rows in elective_df.groupby(
-            ["semester", "elective_group"]
-        ):
-            schedule_cross_section_electives(semester, group_name, group_rows)
-
-    # Step 2: Schedule normal subjects
-    normal_df = pd.DataFrame(normal_rows) if normal_rows else pd.DataFrame()
-    for _, row in normal_df.iterrows():
-        sub_match = subjects_df[subjects_df["subject_code"] == row["subject_code"]]
-        if sub_match.empty:
-            unscheduled_lectures.append(
-                f"{row['class']}: {row['subject_code']} not in subject master."
-            )
-            continue
-        schedule_normal_subject(row, sub_match.iloc[0])
-
-    return all_timetables, unscheduled_lectures
-
-
-# ==========================================
-# 5. LEAVE MANAGEMENT
-# ==========================================
-def adjust_for_leave(timetables, absent_teacher, absent_day):
-    adjusted_tts = copy.deepcopy(timetables)
-    slot_labels_list = [
-        "09:00", "09:55", "10:50", "11:45",
-        "12:40 (LUNCH)", "13:35", "14:30", "15:25"
-    ]
-
-    for class_key, df in adjusted_tts.items():
-        daily_schedule = df.loc[absent_day].tolist()
-
-        # Step 1: Clear absent teacher slots
-        for i, cell in enumerate(daily_schedule):
-            cell_str = str(cell)
-            if f"({absent_teacher})" in cell_str:
-                if "=== Electives ===" in cell_str:
-                    lines = cell_str.split("\n")
-                    new_lines = [l for l in lines if f"({absent_teacher})" not in l]
-                    daily_schedule[i] = "\n".join(new_lines).strip()
-                else:
-                    daily_schedule[i] = ""
-
-        # Step 2: Compress schedule (pull later classes forward)
-        for empty_idx in range(len(daily_schedule)):
-            if slot_labels_list[empty_idx] == "12:40 (LUNCH)":
+    if elec_rows:
+        for (sem, grp), gr in pd.DataFrame(elec_rows).groupby(["semester", "elective_group"]):
+            schedule_electives(sem, grp, gr)
+    if norm_rows:
+        for _, r in pd.DataFrame(norm_rows).iterrows():
+            sm = subjects_df[subjects_df["subject_code"] == r["subject_code"]]
+            if sm.empty:
+                unscheduled.append(f"{r['class']}: {r['subject_code']} missing.")
                 continue
-            if daily_schedule[empty_idx] == "":
-                for later_idx in range(empty_idx + 1, len(daily_schedule)):
-                    if slot_labels_list[later_idx] == "12:40 (LUNCH)":
-                        continue
-                    candidate = daily_schedule[later_idx]
-                    if candidate != "" and "=== Electives ===" not in str(candidate):
-                        daily_schedule[empty_idx] = candidate
-                        daily_schedule[later_idx] = ""
-                        break
+            schedule_normal(r, sm.iloc[0])
 
-        adjusted_tts[class_key].loc[absent_day] = daily_schedule
-
-    return adjusted_tts
-
+    return all_timetables, unscheduled
 
 # ==========================================
-# 6. SIDEBAR
+# 5. TIMETABLE COMPACTION
 # ==========================================
-st.sidebar.title("📚 Pro Timetable System")
-page = st.sidebar.radio(
-    "Navigation",
-    [
-        "Dashboard",
-        "Generator",
-        "Timetable Viewer",
-        "Teacher Leave Manager",
-        "Teachers",
-        "Subjects",
-        "Classes / Sections",
-        "Rooms",
-        "Teacher Preferences",
-        "Class Subject Mapping"
-    ]
-)
+def compact_timetables(timetables):
+    compacted = copy.deepcopy(timetables)
+    ordered_slots = ["09:00", "09:55", "10:50", "11:45", "12:40 (LUNCH)", "13:35", "14:30", "15:25"]
+    morning_slots = ["09:00", "09:55", "10:50", "11:45"]
+    afternoon_slots = ["13:35", "14:30", "15:25"]
 
+    for class_key, df in compacted.items():
+        for day in df.index:
+            row = df.loc[day].to_dict()
+
+            morning_vals = []
+            for s in morning_slots:
+                val = str(row.get(s, "")).strip()
+                if val and val != "LUNCH":
+                    morning_vals.append(val)
+
+            afternoon_vals = []
+            for s in afternoon_slots:
+                val = str(row.get(s, "")).strip()
+                if val and val != "LUNCH":
+                    afternoon_vals.append(val)
+
+            new_row = {slot: "" for slot in ordered_slots}
+            new_row["12:40 (LUNCH)"] = "LUNCH"
+
+            for i, val in enumerate(morning_vals):
+                if i < len(morning_slots):
+                    new_row[morning_slots[i]] = val
+
+            for i, val in enumerate(afternoon_vals):
+                if i < len(afternoon_slots):
+                    new_row[afternoon_slots[i]] = val
+
+            for slot in ordered_slots:
+                df.at[day, slot] = new_row[slot]
+
+    return compacted
+
+# ==========================================
+# 6. LEAVE MANAGEMENT
+# ==========================================
+def adjust_for_leave(timetables, teacher, day):
+    adj = copy.deepcopy(timetables)
+    slots_list = ["09:00", "09:55", "10:50", "11:45", "12:40 (LUNCH)", "13:35", "14:30", "15:25"]
+    for ck, df in adj.items():
+        sched = df.loc[day].tolist()
+        for i, cell in enumerate(sched):
+            cs = str(cell)
+            if f"({teacher})" in cs:
+                if "=== Electives ===" in cs:
+                    sched[i] = "\n".join(l for l in cs.split("\n") if f"({teacher})" not in l).strip()
+                else:
+                    sched[i] = ""
+        for ei in range(len(sched)):
+            if slots_list[ei] == "12:40 (LUNCH)" or sched[ei] != "":
+                continue
+            for li in range(ei + 1, len(sched)):
+                if slots_list[li] == "12:40 (LUNCH)":
+                    continue
+                if sched[li] != "" and "=== Electives ===" not in str(sched[li]):
+                    sched[ei], sched[li] = sched[li], ""
+                    break
+        adj[ck].loc[day] = sched
+    return adj
+
+# ==========================================
+# 7. SIDEBAR
+# ==========================================
+st.sidebar.title("📚 Schedulify")
+page = st.sidebar.radio("Navigation", [
+    "Dashboard", "Generator", "Timetable Viewer", "Teacher Leave Manager",
+    "Teachers", "Subjects", "Classes / Sections", "Rooms", "Teacher Preferences", "Class Subject Mapping"
+])
 st.sidebar.markdown("---")
-st.sidebar.success("✅ G1/G2 Batching Active")
-st.sidebar.success("✅ Strict Parallel Electives")
-st.sidebar.success("✅ Smart Gap Avoidance")
-st.sidebar.success("✅ Edit & Delete Enabled")
-
+st.sidebar.success("✅ G1/G2 Paired Scheduling")
+st.sidebar.success("✅ Zero Gap Optimization")
+st.sidebar.success("✅ Smart Room Allocation")
+st.sidebar.success("✅ Excel Export Ready")
 
 # ==========================================
-# 7. DASHBOARD
+# 8. DASHBOARD
 # ==========================================
 if page == "Dashboard":
-    st.title("📅 Pro College Timetable Dashboard")
-    st.write(
-        "Complete timetable engine with G1/G2 batching, "
-        "parallel electives, gap avoidance, and leave handling."
-    )
+    st.markdown("""
+    <div class="main-card" style="text-align:center;">
+        <div class="hero-badge">🎓 D.A.V. Institute of Engineering & Technology - CSE Department</div>
+        <div class="hero-title">SCHEDULIFY</div>
+        <p class="hero-subtitle">Your Brain for Better Scheduling</p>
+        <p style="font-size:1.1rem; color:#4b5563; max-width:700px; margin:0 auto;">
+            Effortlessly generate smart timetables, manage teachers, allocate rooms,
+            and eliminate scheduling conflicts with precision.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Teachers", len(teachers_df))
-    col2.metric("Subjects", len(subjects_df))
-    col3.metric("Classes / Sections", len(classes_df))
-
-    col4, col5, col6 = st.columns(3)
-    col4.metric("Rooms", len(rooms_df))
-    col5.metric("Preferences", len(preferences_df))
-    col6.metric("Class-Subject Mappings", len(class_subjects_df))
+    c1, c2, c3 = st.columns(3)
+    c1.metric("👨‍🏫 Teachers", len(teachers_df))
+    c2.metric("📘 Subjects", len(subjects_df))
+    c3.metric("🏫 Classes", len(classes_df))
+    c4, c5, c6 = st.columns(3)
+    c4.metric("🚪 Rooms", len(rooms_df))
+    c5.metric("⭐ Preferences", len(preferences_df))
+    c6.metric("🧩 Mappings", len(class_subjects_df))
 
     st.markdown("---")
-    st.subheader("✅ Features")
-    st.write("""
-    - Dynamic sections (A, B, C, D...)
-    - L-T-P based subject structure
-    - Lab and Tutorial split into G1 / G2 batches
-    - Electives scheduled simultaneously for all sections
-    - Open Electives scheduled simultaneously for all sections
-    - No teacher clash (Hard Constraint)
-    - No class double booking (Hard Constraint)
-    - No room conflict (Hard Constraint)
-    - Weekly hour satisfaction per subject
-    - No same subject repeated on same day
-    - Smart gap avoidance (Soft Constraint)
-    - Even distribution across the week (Soft Constraint)
-    - Teacher leave adjustment with schedule compression
-    - Full Edit and Delete support for all data
-    """)
+    st.subheader("✨ Core Features")
+    st.markdown("""
+    <div class="feature-grid">
+        <div class="feature-card"><b>🔄 G1/G2 Paired Scheduling</b><br>Labs & Tutorials scheduled back-to-back. Zero wasted hours.</div>
+        <div class="feature-card"><b>🎨 Colored Timetables</b><br>Theory, Lab, Tutorial & Electives color-coded for instant readability.</div>
+        <div class="feature-card"><b>📊 Excel Export</b><br>Download professional .xlsx files for printing & sharing.</div>
+        <div class="feature-card"><b>🛡️ Duplicate Protection</b><br>Smart validation prevents overlapping codes & entries.</div>
+        <div class="feature-card"><b>🩺 Leave Manager</b><br>Auto-compress schedules when teachers are absent.</div>
+        <div class="feature-card"><b>⚡ Constraint Engine</b><br>Hard & soft constraints optimized for academic excellence.</div>
+    </div>
+    """, unsafe_allow_html=True)
 
     if not classes_df.empty:
         st.subheader("📌 Dynamic Section Summary")
-        summary = classes_df.groupby(
-            ["session_name", "batch_year", "semester"]
-        )["section"].apply(list).reset_index()
-        st.dataframe(summary, use_container_width=True)
-
-    if not subjects_df.empty:
-        st.subheader("📘 Subject Hour Summary")
-        temp_df = subjects_df.copy()
-        temp_df["total_hours"] = (
-            temp_df["l_hours"].fillna(0).astype(int)
-            + temp_df["t_hours"].fillna(0).astype(int)
-            + temp_df["p_hours"].fillna(0).astype(int)
+        st.dataframe(
+            classes_df.groupby(["session_name", "batch_year", "semester"])["section"].apply(list).reset_index(),
+            use_container_width=True
         )
-        st.dataframe(temp_df, use_container_width=True)
-
 
 # ==========================================
-# 8. GENERATOR
+# 9. GENERATOR
 # ==========================================
 elif page == "Generator":
     st.title("⚙️ Generate Optimized Timetable")
-
-    if class_subjects_df.empty:
-        st.warning("Please add Class Subject Mapping data first.")
-    elif preferences_df.empty:
-        st.warning("Please add Teacher Preferences data first.")
-    elif rooms_df.empty:
-        st.warning("Please add Rooms data first.")
-    elif subjects_df.empty:
-        st.warning("Please add Subjects data first.")
-    elif teachers_df.empty:
-        st.warning("Please add Teachers data first.")
+    if any(df.empty for df in [class_subjects_df, preferences_df, rooms_df, subjects_df, teachers_df]):
+        st.warning("⚠️ Please complete all master data pages first.")
     else:
-        session_options = sorted(
-            class_subjects_df["session_name"].dropna().unique().tolist()
-        )
-        if session_options:
-            selected_session = st.selectbox("Select Session", session_options)
+        sessions = sorted(class_subjects_df["session_name"].dropna().unique())
+        sel = st.selectbox("Select Session", sessions)
+        if st.button("🚀 Generate Timetable", type="primary"):
+            with st.spinner("Running constraint optimizer..."):
+                alloc, _ = allocate_teachers(sel, class_subjects_df, preferences_df, teachers_df)
+                tt, unsch = generate_schedule(alloc, subjects_df, rooms_df)
+                tt = compact_timetables(tt)
 
-            if st.button("🚀 Generate Timetable", type="primary"):
-                with st.spinner("Running constraint optimizer..."):
-                    alloc_df, _ = allocate_teachers(
-                        selected_session, class_subjects_df,
-                        preferences_df, teachers_df
-                    )
-                    tt_res, unsch = generate_schedule(alloc_df, subjects_df, rooms_df)
+                st.session_state["allocations"] = alloc
+                st.session_state["timetable"] = tt
+                st.session_state["base_timetable"] = copy.deepcopy(tt)
+                st.session_state["unscheduled"] = unsch
+            st.success("✅ Timetable generated successfully.")
 
-                    st.session_state["allocations"] = alloc_df
-                    st.session_state["timetable"] = tt_res
-                    st.session_state["base_timetable"] = copy.deepcopy(tt_res)
-                    st.session_state["unscheduled"] = unsch
+        if st.session_state["allocations"] is not None:
+            st.subheader("📌 Teacher Allocations")
+            st.dataframe(st.session_state["allocations"], use_container_width=True)
 
-                st.success("Timetable generated successfully.")
-
-            if st.session_state["allocations"] is not None:
-                st.subheader("📌 Teacher Allocations")
-                st.dataframe(
-                    st.session_state["allocations"], use_container_width=True
-                )
-
-            if st.session_state["unscheduled"]:
-                st.subheader("⚠️ Unscheduled Items")
-                for item in st.session_state["unscheduled"]:
-                    st.warning(item)
-            else:
-                if st.session_state["timetable"] is not None:
-                    st.info("All sessions scheduled successfully.")
-
+        if st.session_state["unscheduled"]:
+            st.subheader("⚠️ Unscheduled Items")
+            for i in st.session_state["unscheduled"]:
+                st.warning(i)
+        elif st.session_state["timetable"] is not None:
+            st.info("🎉 All sessions scheduled successfully.")
 
 # ==========================================
-# 9. TIMETABLE VIEWER
+# 10. TIMETABLE VIEWER
 # ==========================================
 elif page == "Timetable Viewer":
     st.title("🗓 Timetable Viewer")
-
     if st.session_state["timetable"] is None:
-        st.warning("Please generate the timetable first from the Generator page.")
+        st.warning("Please generate the timetable first.")
     else:
-        class_options = sorted(list(st.session_state["timetable"].keys()))
-        selected_class = st.selectbox("Select Class", class_options)
+        classes = sorted(st.session_state["timetable"].keys())
+        sel = st.selectbox("Select Class", classes)
+        if sel:
+            df = st.session_state["timetable"][sel]
+            st.subheader(f"Timetable for {sel}")
 
-        if selected_class:
-            st.subheader(f"Timetable for {selected_class}")
-            display_df = st.session_state["timetable"][selected_class]
-            st.dataframe(display_df, use_container_width=True)
+            html = "<table style='width:100%; border-collapse:collapse; font-family:sans-serif;'>"
+            html += "<tr style='background:#f8fafc; font-weight:bold;'><th style='padding:10px; border:1px solid #e5e7eb;'>Day</th>"
+            for col in df.columns:
+                html += f"<th style='padding:10px; border:1px solid #e5e7eb;'>{col}</th>"
+            html += "</tr>"
 
-            csv_data = display_df.to_csv().encode("utf-8")
+            for idx, row in df.iterrows():
+                html += f"<tr><td style='padding:10px; border:1px solid #e5e7eb; font-weight:bold; background:#f3f4f6;'>{idx}</td>"
+                for val in row:
+                    v = str(val)
+                    cls = "cell-empty"
+                    if "LUNCH" in v:
+                        cls = "cell-lunch"
+                    elif "-L" in v:
+                        cls = "cell-theory"
+                    elif "-P" in v:
+                        cls = "cell-lab"
+                    elif "-T" in v:
+                        cls = "cell-tutorial"
+                    elif "Electives" in v:
+                        cls = "cell-elective"
+                    html += f"<td style='padding:8px; border:1px solid #e5e7eb;'><div class='timetable-cell {cls}'>{v.replace(chr(10), '<br>')}</div></td>"
+                html += "</tr>"
+            html += "</table>"
+            st.markdown(html, unsafe_allow_html=True)
+
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df.to_excel(writer, sheet_name='Timetable', index=True)
+
             st.download_button(
-                label="Download Timetable CSV",
-                data=csv_data,
-                file_name=f"{selected_class.replace(' ', '_')}_timetable.csv",
-                mime="text/csv"
+                "📥 Download Excel (.xlsx)",
+                output.getvalue(),
+                f"{sel.replace(' ', '_')}_timetable.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-
 # ==========================================
-# 10. TEACHER LEAVE MANAGER
+# 11. LEAVE MANAGER
 # ==========================================
 elif page == "Teacher Leave Manager":
-    st.title("🩺 Teacher Leave & Schedule Adjustment")
-    st.write(
-        "Remove an absent teacher's classes and compress the day schedule "
-        "automatically. Elective blocks are preserved."
-    )
-
+    st.title("🩺 Teacher Leave & Adjustment")
     if st.session_state["base_timetable"] is None:
-        st.warning("Please generate the timetable first from the Generator page.")
+        st.warning("Generate timetable first.")
     else:
         c1, c2 = st.columns(2)
-        absent_teacher = c1.selectbox(
-            "Select Teacher on Leave",
-            sorted(teachers_df["teacher_code"].dropna().tolist())
-        )
-        absent_day = c2.selectbox(
-            "Select Day of Leave",
-            ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+
+        teacher_options_df = teachers_df.dropna(subset=["teacher_code"]).copy()
+        teacher_options_df["teacher_display"] = teacher_options_df.apply(
+            lambda r: f"{r['teacher_code']} - {r['teacher_name']}" if str(r.get("teacher_name", "")).strip() else str(r["teacher_code"]),
+            axis=1
         )
 
+        teacher_display_map = dict(zip(teacher_options_df["teacher_display"], teacher_options_df["teacher_code"]))
+        selected_teacher_display = c1.selectbox("Teacher on Leave", sorted(teacher_display_map.keys()))
+        teacher = teacher_display_map[selected_teacher_display]
+
+        day = c2.selectbox("Day", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"])
         col1, col2 = st.columns(2)
+
         with col1:
-            if st.button("Adjust Timetable for Leave", type="primary"):
-                new_tt = adjust_for_leave(
-                    st.session_state["base_timetable"],
-                    absent_teacher,
-                    absent_day
-                )
-                st.session_state["timetable"] = new_tt
-                st.success(
-                    f"Schedule adjusted for {absent_teacher} on {absent_day}. "
-                    "Later classes have been pulled forward."
-                )
+            if st.button("Adjust Schedule", type="primary"):
+                adjusted = adjust_for_leave(st.session_state["base_timetable"], teacher, day)
+                adjusted = compact_timetables(adjusted)
+                st.session_state["timetable"] = adjusted
+                st.success(f"✅ Schedule compressed for {selected_teacher_display} on {day}.")
 
         with col2:
-            if st.button("Reset to Original Schedule"):
-                st.session_state["timetable"] = copy.deepcopy(
-                    st.session_state["base_timetable"]
-                )
-                st.info("Original schedule restored.")
-
+            if st.button("Reset Original"):
+                st.session_state["timetable"] = copy.deepcopy(st.session_state["base_timetable"])
+                st.info("🔄 Original restored.")
 
 # ==========================================
-# 11. TEACHERS PAGE (with Edit & Delete)
+# 12. TEACHERS
 # ==========================================
 elif page == "Teachers":
     st.title("👨‍🏫 Teachers")
-
-    # Add Form
     with st.form("teacher_form"):
-        c1, c2 = st.columns(2)
-        teacher_code = c1.text_input("Teacher Code")
-        teacher_name = c2.text_input("Teacher Name")
-
-        c3, c4 = st.columns(2)
-        short_name = c3.text_input("Short Name")
-        department = c4.text_input("Department", value="CSE")
-
-        submitted = st.form_submit_button("Add Teacher")
-        if submitted:
-            if teacher_code and teacher_name:
-                new_row = pd.DataFrame([{
-                    "teacher_code": teacher_code.strip(),
-                    "teacher_name": teacher_name.strip(),
-                    "short_name": short_name.strip(),
-                    "department": department.strip()
-                }])
-                teachers_df = pd.concat(
-                    [teachers_df, new_row], ignore_index=True
-                )
-                save_csv(teachers_df, "teachers.csv")
-                st.success("Teacher added successfully.")
-                st.rerun()
+        code = st.text_input("Teacher Code")
+        name = st.text_input("Teacher Name")
+        dept = st.text_input("Department", "CSE")
+        if st.form_submit_button("Add Teacher"):
+            if not code or not name:
+                st.error("Code & Name required.")
+            elif is_duplicate(teachers_df, "teacher_code", code):
+                st.error("Teacher code already exists.")
             else:
-                st.error("Teacher code and name are required.")
+                teachers_df = pd.concat([
+                    teachers_df,
+                    pd.DataFrame([{
+                        "teacher_code": code.strip(),
+                        "teacher_name": name.strip(),
+                        "department": dept.strip()
+                    }])
+                ], ignore_index=True)
+                save_csv(teachers_df, "teachers.csv")
+                st.success("✅ Added.")
+                st.rerun()
 
     st.markdown("---")
     st.subheader("Teacher List")
-
     if teachers_df.empty:
-        st.info("No teachers added yet.")
+        st.info("No teachers yet.")
     else:
-        # Edit Form (shown when edit button is clicked)
         if st.session_state["edit_teacher_idx"] is not None:
             idx = st.session_state["edit_teacher_idx"]
-            st.subheader(f"✏️ Editing Row {idx}")
             row = teachers_df.loc[idx]
-
             with st.form("edit_teacher_form"):
+                nc = st.text_input("Code", str(row["teacher_code"]))
+                nn = st.text_input("Name", str(row["teacher_name"]))
+                nd = st.text_input("Department", str(row["department"]))
                 c1, c2 = st.columns(2)
-                new_code = c1.text_input("Teacher Code", value=str(row["teacher_code"]))
-                new_name = c2.text_input("Teacher Name", value=str(row["teacher_name"]))
-
-                c3, c4 = st.columns(2)
-                new_short = c3.text_input("Short Name", value=str(row["short_name"]))
-                new_dept = c4.text_input("Department", value=str(row["department"]))
-
-                cs1, cs2 = st.columns(2)
-                save_btn = cs1.form_submit_button("💾 Save Changes")
-                cancel_btn = cs2.form_submit_button("❌ Cancel")
-
-                if save_btn:
-                    teachers_df.at[idx, "teacher_code"] = new_code.strip()
-                    teachers_df.at[idx, "teacher_name"] = new_name.strip()
-                    teachers_df.at[idx, "short_name"] = new_short.strip()
-                    teachers_df.at[idx, "department"] = new_dept.strip()
+                if c1.form_submit_button("💾 Save"):
+                    teachers_df.at[idx, "teacher_code"] = nc.strip()
+                    teachers_df.at[idx, "teacher_name"] = nn.strip()
+                    teachers_df.at[idx, "department"] = nd.strip()
                     save_csv(teachers_df, "teachers.csv")
                     st.session_state["edit_teacher_idx"] = None
-                    st.success("Teacher updated successfully.")
+                    st.success("✅ Updated.")
                     st.rerun()
-
-                if cancel_btn:
+                if c2.form_submit_button("❌ Cancel"):
                     st.session_state["edit_teacher_idx"] = None
                     st.rerun()
 
-        # Table with Edit/Delete buttons
-        for idx, row in teachers_df.iterrows():
-            col1, col2, col3, col4, col5, col6 = st.columns([2, 3, 2, 2, 1, 1])
-            col1.write(row["teacher_code"])
-            col2.write(row["teacher_name"])
-            col3.write(row["short_name"])
-            col4.write(row["department"])
+        h = st.columns([2, 3, 2, 1, 1])
+        h[0].markdown("**Code**")
+        h[1].markdown("**Name**")
+        h[2].markdown("**Dept**")
+        h[3].markdown("**Edit**")
+        h[4].markdown("**Del**")
 
-            if col5.button("✏️", key=f"edit_t_{idx}"):
-                st.session_state["edit_teacher_idx"] = idx
+        for i, r in teachers_df.iterrows():
+            c1, c2, c3, c4, c5 = st.columns([2, 3, 2, 1, 1])
+            c1.write(r["teacher_code"])
+            c2.write(r["teacher_name"])
+            c3.write(r["department"])
+            if c4.button("✏️", key=f"et{i}"):
+                st.session_state["edit_teacher_idx"] = i
                 st.rerun()
-
-            if col6.button("🗑️", key=f"del_t_{idx}"):
-                teachers_df = teachers_df.drop(index=idx).reset_index(drop=True)
+            if c5.button("🗑️", key=f"dt{i}"):
+                teachers_df = teachers_df.drop(i).reset_index(drop=True)
                 save_csv(teachers_df, "teachers.csv")
-                st.success("Teacher deleted.")
+                st.success("✅ Deleted.")
                 st.rerun()
-
 
 # ==========================================
-# 12. SUBJECTS PAGE (with Edit & Delete)
+# 13. SUBJECTS
 # ==========================================
 elif page == "Subjects":
     st.title("📘 Subjects")
-
-    # Add Form
     with st.form("subject_form"):
-        c1, c2 = st.columns(2)
-        subject_code = c1.text_input("Subject Code")
-        subject_name = c2.text_input("Subject Name")
-
-        c3, c4 = st.columns(2)
-        subject_type = c3.selectbox(
-            "Subject Type", ["THEORY", "LAB", "ELECTIVE", "OPEN_ELECTIVE"]
-        )
-        requires_lab_room = c4.checkbox("Requires Lab Room", value=False)
-
-        st.subheader("Weekly Hours Distribution (L-T-P)")
-        c5, c6, c7, c8 = st.columns(4)
-        l_hours = c5.number_input("L (Lecture)", min_value=0, max_value=10, value=3)
-        t_hours = c6.number_input("T (Tutorial)", min_value=0, max_value=10, value=0)
-        p_hours = c7.number_input("P (Practical)", min_value=0, max_value=10, value=0)
-        continuous_slots = c8.number_input(
-            "Continuous Slots Required", min_value=1, max_value=4, value=1
-        )
-
-        submitted = st.form_submit_button("Add Subject")
-        if submitted:
-            if subject_code and subject_name:
-                new_row = pd.DataFrame([{
-                    "subject_code": subject_code.strip(),
-                    "subject_name": subject_name.strip(),
-                    "subject_type": subject_type,
-                    "l_hours": int(l_hours),
-                    "t_hours": int(t_hours),
-                    "p_hours": int(p_hours),
-                    "requires_lab_room": requires_lab_room,
-                    "continuous_slots_required": int(continuous_slots)
-                }])
-                subjects_df = pd.concat(
-                    [subjects_df, new_row], ignore_index=True
-                )
-                save_csv(subjects_df, "subjects.csv")
-                st.success("Subject added successfully.")
-                st.rerun()
+        code, name = st.text_input("Code"), st.text_input("Name")
+        stype = st.selectbox("Type", ["THEORY", "LAB", "ELECTIVE", "OPEN_ELECTIVE"])
+        req_lab = st.checkbox("Requires Lab Room")
+        l, t, p = st.columns(3)
+        lh = l.number_input("L", 0, 10, 3)
+        th = t.number_input("T", 0, 10, 0)
+        ph = p.number_input("P", 0, 10, 0)
+        cs = st.number_input("Continuous Slots", 1, 4, 1)
+        if st.form_submit_button("Add Subject"):
+            if not code or not name:
+                st.error("Code & Name required.")
+            elif is_duplicate(subjects_df, "subject_code", code):
+                st.error("Subject code already exists.")
             else:
-                st.error("Subject code and name are required.")
+                subjects_df = pd.concat([
+                    subjects_df,
+                    pd.DataFrame([{
+                        "subject_code": code.strip(),
+                        "subject_name": name.strip(),
+                        "subject_type": stype,
+                        "l_hours": lh,
+                        "t_hours": th,
+                        "p_hours": ph,
+                        "requires_lab_room": req_lab,
+                        "continuous_slots_required": cs
+                    }])
+                ], ignore_index=True)
+                save_csv(subjects_df, "subjects.csv")
+                st.success("✅ Added.")
+                st.rerun()
 
     st.markdown("---")
     st.subheader("Subject List")
-
     if subjects_df.empty:
-        st.info("No subjects added yet.")
+        st.info("No subjects yet.")
     else:
-        # Edit Form
         if st.session_state["edit_subject_idx"] is not None:
             idx = st.session_state["edit_subject_idx"]
-            st.subheader(f"✏️ Editing Row {idx}")
             row = subjects_df.loc[idx]
-
             with st.form("edit_subject_form"):
-                c1, c2 = st.columns(2)
-                n_code = c1.text_input("Subject Code", value=str(row["subject_code"]))
-                n_name = c2.text_input("Subject Name", value=str(row["subject_name"]))
-
-                c3, c4 = st.columns(2)
-                type_options = ["THEORY", "LAB", "ELECTIVE", "OPEN_ELECTIVE"]
-                current_type = str(row["subject_type"])
-                type_idx = type_options.index(current_type) if current_type in type_options else 0
-                n_type = c3.selectbox("Subject Type", type_options, index=type_idx)
-                n_req_lab = c4.checkbox(
-                    "Requires Lab Room",
-                    value=bool(row["requires_lab_room"])
-                )
-
-                st.subheader("Weekly Hours (L-T-P)")
-                c5, c6, c7, c8 = st.columns(4)
-                n_l = c5.number_input("L", 0, 10, int(row["l_hours"]))
-                n_t = c6.number_input("T", 0, 10, int(row["t_hours"]))
-                n_p = c7.number_input("P", 0, 10, int(row["p_hours"]))
-                n_cs = c8.number_input(
-                    "Continuous Slots", 1, 4,
-                    int(row["continuous_slots_required"])
-                )
-
-                cs1, cs2 = st.columns(2)
-                save_btn = cs1.form_submit_button("💾 Save Changes")
-                cancel_btn = cs2.form_submit_button("❌ Cancel")
-
-                if save_btn:
-                    subjects_df.at[idx, "subject_code"] = n_code.strip()
-                    subjects_df.at[idx, "subject_name"] = n_name.strip()
-                    subjects_df.at[idx, "subject_type"] = n_type
-                    subjects_df.at[idx, "l_hours"] = n_l
-                    subjects_df.at[idx, "t_hours"] = n_t
-                    subjects_df.at[idx, "p_hours"] = n_p
-                    subjects_df.at[idx, "requires_lab_room"] = n_req_lab
-                    subjects_df.at[idx, "continuous_slots_required"] = n_cs
+                nc = st.text_input("Code", str(row["subject_code"]))
+                nn = st.text_input("Name", str(row["subject_name"]))
+                opts = ["THEORY", "LAB", "ELECTIVE", "OPEN_ELECTIVE"]
+                nt_sel = st.selectbox("Type", opts, index=opts.index(str(row["subject_type"])) if str(row["subject_type"]) in opts else 0)
+                nr = st.checkbox("Requires Lab", bool(row["requires_lab_room"]))
+                c1, c2, c3, c4 = st.columns(4)
+                nl = c1.number_input("L", 0, 10, int(row["l_hours"]))
+                nt2 = c2.number_input("T", 0, 10, int(row["t_hours"]))
+                np = c3.number_input("P", 0, 10, int(row["p_hours"]))
+                ncs = c4.number_input("Slots", 1, 4, int(row["continuous_slots_required"]))
+                s1, s2 = st.columns(2)
+                if s1.form_submit_button("💾 Save"):
+                    subjects_df.at[idx, "subject_code"] = nc.strip()
+                    subjects_df.at[idx, "subject_name"] = nn.strip()
+                    subjects_df.at[idx, "subject_type"] = nt_sel
+                    subjects_df.at[idx, "l_hours"] = nl
+                    subjects_df.at[idx, "t_hours"] = nt2
+                    subjects_df.at[idx, "p_hours"] = np
+                    subjects_df.at[idx, "requires_lab_room"] = nr
+                    subjects_df.at[idx, "continuous_slots_required"] = ncs
                     save_csv(subjects_df, "subjects.csv")
                     st.session_state["edit_subject_idx"] = None
-                    st.success("Subject updated successfully.")
+                    st.success("✅ Updated.")
                     st.rerun()
-
-                if cancel_btn:
+                if s2.form_submit_button("❌ Cancel"):
                     st.session_state["edit_subject_idx"] = None
                     st.rerun()
 
-        # Table
-        header = st.columns([2, 3, 2, 1, 1, 1, 2, 1, 1])
-        header[0].markdown("**Code**")
-        header[1].markdown("**Name**")
-        header[2].markdown("**Type**")
-        header[3].markdown("**L**")
-        header[4].markdown("**T**")
-        header[5].markdown("**P**")
-        header[6].markdown("**Slots**")
-        header[7].markdown("**Edit**")
-        header[8].markdown("**Del**")
+        h = st.columns([2, 3, 2, 1, 1, 1, 2, 1, 1])
+        for x, y in zip(h, ["**Code**", "**Name**", "**Type**", "**L**", "**T**", "**P**", "**Slots**", "**Edit**", "**Del**"]):
+            x.markdown(y)
 
-        for idx, row in subjects_df.iterrows():
-            col = st.columns([2, 3, 2, 1, 1, 1, 2, 1, 1])
-            col[0].write(row["subject_code"])
-            col[1].write(row["subject_name"])
-            col[2].write(row["subject_type"])
-            col[3].write(int(row["l_hours"]))
-            col[4].write(int(row["t_hours"]))
-            col[5].write(int(row["p_hours"]))
-            col[6].write(int(row["continuous_slots_required"]))
-
-            if col[7].button("✏️", key=f"edit_s_{idx}"):
-                st.session_state["edit_subject_idx"] = idx
+        for i, r in subjects_df.iterrows():
+            c = st.columns([2, 3, 2, 1, 1, 1, 2, 1, 1])
+            c[0].write(r["subject_code"])
+            c[1].write(r["subject_name"])
+            c[2].write(r["subject_type"])
+            c[3].write(int(r["l_hours"]))
+            c[4].write(int(r["t_hours"]))
+            c[5].write(int(r["p_hours"]))
+            c[6].write(int(r["continuous_slots_required"]))
+            if c[7].button("✏️", key=f"es{i}"):
+                st.session_state["edit_subject_idx"] = i
                 st.rerun()
-
-            if col[8].button("🗑️", key=f"del_s_{idx}"):
-                subjects_df = subjects_df.drop(index=idx).reset_index(drop=True)
+            if c[8].button("🗑️", key=f"ds{i}"):
+                subjects_df = subjects_df.drop(i).reset_index(drop=True)
                 save_csv(subjects_df, "subjects.csv")
-                st.success("Subject deleted.")
+                st.success("✅ Deleted.")
                 st.rerun()
-
 
 # ==========================================
-# 13. CLASSES / SECTIONS PAGE (with Edit & Delete)
+# 14. CLASSES / SECTIONS
 # ==========================================
 elif page == "Classes / Sections":
     st.title("🏫 Classes / Sections")
-    st.write(
-        "Sections are fully dynamic. Add A, B, C, D as per requirement. "
-        "The generator will automatically handle all sections."
-    )
-
-    # Add Form
     with st.form("class_form"):
+        sess = st.text_input("Session", "2025-26-even")
         c1, c2, c3 = st.columns(3)
-        session_name = c1.text_input("Session Name", value="2025-26-even")
-        batch_year = c2.number_input(
-            "Batch Year", min_value=2020, max_value=2035, value=2024
-        )
-        semester = c3.number_input(
-            "Semester", min_value=1, max_value=8, value=4
-        )
-
-        c4, c5, c6 = st.columns(3)
-        section = c4.text_input("Section", value="A")
-        program = c5.text_input("Program", value="CSE")
-        strength = c6.number_input(
-            "Strength", min_value=1, max_value=200, value=60
-        )
-
-        submitted = st.form_submit_button("Add Class Section")
-        if submitted:
-            if session_name and section:
-                new_row = pd.DataFrame([{
-                    "session_name": session_name.strip(),
-                    "batch_year": int(batch_year),
-                    "semester": int(semester),
-                    "section": section.strip(),
-                    "program": program.strip(),
-                    "strength": int(strength)
-                }])
-                classes_df = pd.concat(
-                    [classes_df, new_row], ignore_index=True
-                )
-                save_csv(classes_df, "classes.csv")
-                st.success("Class section added successfully.")
-                st.rerun()
+        yr = c1.number_input("Batch Year", 2020, 2035, 2024)
+        sem = c2.number_input("Semester", 1, 8, 4)
+        sec = c3.text_input("Section", "A")
+        prog = st.text_input("Program", "CSE")
+        strn = st.number_input("Strength", 1, 200, 60)
+        if st.form_submit_button("Add Class"):
+            if not sess or not sec:
+                st.error("Session & Section required.")
+            elif is_duplicate_row(classes_df, {
+                "session_name": sess,
+                "batch_year": yr,
+                "semester": sem,
+                "section": sec,
+                "program": prog
+            }):
+                st.error("This class/section already exists.")
             else:
-                st.error("Session name and section are required.")
+                classes_df = pd.concat([
+                    classes_df,
+                    pd.DataFrame([{
+                        "session_name": sess.strip(),
+                        "batch_year": yr,
+                        "semester": sem,
+                        "section": sec.strip(),
+                        "program": prog.strip(),
+                        "strength": strn
+                    }])
+                ], ignore_index=True)
+                save_csv(classes_df, "classes.csv")
+                st.success("✅ Added.")
+                st.rerun()
 
     st.markdown("---")
     st.subheader("Class Sections")
-
     if classes_df.empty:
-        st.info("No class sections added yet.")
+        st.info("No classes yet.")
     else:
-        # Edit Form
         if st.session_state["edit_class_idx"] is not None:
             idx = st.session_state["edit_class_idx"]
-            st.subheader(f"✏️ Editing Row {idx}")
             row = classes_df.loc[idx]
-
             with st.form("edit_class_form"):
+                ns = st.text_input("Session", str(row["session_name"]))
                 c1, c2, c3 = st.columns(3)
-                n_sess = c1.text_input("Session Name", value=str(row["session_name"]))
-                n_yr = c2.number_input(
-                    "Batch Year", 2020, 2035, int(row["batch_year"])
-                )
-                n_sem = c3.number_input("Semester", 1, 8, int(row["semester"]))
-
-                c4, c5, c6 = st.columns(3)
-                n_sec = c4.text_input("Section", value=str(row["section"]))
-                n_prog = c5.text_input("Program", value=str(row["program"]))
-                n_str = c6.number_input("Strength", 1, 200, int(row["strength"]))
-
-                cs1, cs2 = st.columns(2)
-                save_btn = cs1.form_submit_button("💾 Save Changes")
-                cancel_btn = cs2.form_submit_button("❌ Cancel")
-
-                if save_btn:
-                    classes_df.at[idx, "session_name"] = n_sess.strip()
-                    classes_df.at[idx, "batch_year"] = n_yr
-                    classes_df.at[idx, "semester"] = n_sem
-                    classes_df.at[idx, "section"] = n_sec.strip()
-                    classes_df.at[idx, "program"] = n_prog.strip()
-                    classes_df.at[idx, "strength"] = n_str
+                ny = c1.number_input("Year", 2020, 2035, int(row["batch_year"]))
+                nsem = c2.number_input("Sem", 1, 8, int(row["semester"]))
+                nsec = c3.text_input("Section", str(row["section"]))
+                npg = st.text_input("Program", str(row["program"]))
+                nst = st.number_input("Strength", 1, 200, int(row["strength"]))
+                s1, s2 = st.columns(2)
+                if s1.form_submit_button("💾 Save"):
+                    classes_df.at[idx, "session_name"] = ns.strip()
+                    classes_df.at[idx, "batch_year"] = ny
+                    classes_df.at[idx, "semester"] = nsem
+                    classes_df.at[idx, "section"] = nsec.strip()
+                    classes_df.at[idx, "program"] = npg.strip()
+                    classes_df.at[idx, "strength"] = nst
                     save_csv(classes_df, "classes.csv")
                     st.session_state["edit_class_idx"] = None
-                    st.success("Class section updated.")
+                    st.success("✅ Updated.")
                     st.rerun()
-
-                if cancel_btn:
+                if s2.form_submit_button("❌ Cancel"):
                     st.session_state["edit_class_idx"] = None
                     st.rerun()
 
-        # Table
-        for idx, row in classes_df.iterrows():
-            col = st.columns([2, 2, 1, 1, 2, 1, 1, 1])
-            col[0].write(row["session_name"])
-            col[1].write(row["program"])
-            col[2].write(int(row["batch_year"]))
-            col[3].write(f"Sem {int(row['semester'])}")
-            col[4].write(f"Section {row['section']}")
-            col[5].write(int(row["strength"]))
-
-            if col[6].button("✏️", key=f"edit_c_{idx}"):
-                st.session_state["edit_class_idx"] = idx
+        for i, r in classes_df.iterrows():
+            c = st.columns([2, 2, 1, 1, 2, 1, 1, 1])
+            c[0].write(r["session_name"])
+            c[1].write(r["program"])
+            c[2].write(int(r["batch_year"]))
+            c[3].write(f"Sem {int(r['semester'])}")
+            c[4].write(f"Sec {r['section']}")
+            c[5].write(int(r["strength"]))
+            if c[6].button("✏️", key=f"ec{i}"):
+                st.session_state["edit_class_idx"] = i
                 st.rerun()
-
-            if col[7].button("🗑️", key=f"del_c_{idx}"):
-                classes_df = classes_df.drop(index=idx).reset_index(drop=True)
+            if c[7].button("🗑️", key=f"dc{i}"):
+                classes_df = classes_df.drop(i).reset_index(drop=True)
                 save_csv(classes_df, "classes.csv")
-                st.success("Class section deleted.")
+                st.success("✅ Deleted.")
                 st.rerun()
-
-        st.markdown("---")
-        st.subheader("Dynamic Section Summary")
-        summary = classes_df.groupby(
-            ["session_name", "batch_year", "semester"]
-        )["section"].apply(list).reset_index()
-        st.dataframe(summary, use_container_width=True)
-
 
 # ==========================================
-# 14. ROOMS PAGE (with Edit & Delete)
+# 15. ROOMS
 # ==========================================
 elif page == "Rooms":
     st.title("🚪 Rooms")
-
-    # Add Form
     with st.form("room_form"):
-        c1, c2, c3 = st.columns(3)
-        room_name = c1.text_input("Room Name")
-        room_type = c2.selectbox("Room Type", ["CLASSROOM", "LAB"])
-        capacity = c3.number_input(
-            "Capacity", min_value=1, max_value=300, value=60
-        )
-
-        submitted = st.form_submit_button("Add Room")
-        if submitted:
-            if room_name:
-                new_row = pd.DataFrame([{
-                    "room_name": room_name.strip(),
-                    "room_type": room_type,
-                    "capacity": int(capacity)
-                }])
-                rooms_df = pd.concat([rooms_df, new_row], ignore_index=True)
-                save_csv(rooms_df, "rooms.csv")
-                st.success("Room added successfully.")
-                st.rerun()
+        name = st.text_input("Room Name")
+        rtype = st.selectbox("Type", ["CLASSROOM", "LAB"])
+        cap = st.number_input("Capacity", 1, 300, 60)
+        if st.form_submit_button("Add Room"):
+            if not name:
+                st.error("Name required.")
+            elif is_duplicate(rooms_df, "room_name", name):
+                st.error("Room name already exists.")
             else:
-                st.error("Room name is required.")
+                rooms_df = pd.concat([
+                    rooms_df,
+                    pd.DataFrame([{
+                        "room_name": name.strip(),
+                        "room_type": rtype,
+                        "capacity": cap
+                    }])
+                ], ignore_index=True)
+                save_csv(rooms_df, "rooms.csv")
+                st.success("✅ Added.")
+                st.rerun()
 
     st.markdown("---")
     st.subheader("Room List")
-
     if rooms_df.empty:
-        st.info("No rooms added yet.")
+        st.info("No rooms yet.")
     else:
-        # Edit Form
         if st.session_state["edit_room_idx"] is not None:
             idx = st.session_state["edit_room_idx"]
-            st.subheader(f"✏️ Editing Row {idx}")
             row = rooms_df.loc[idx]
-
             with st.form("edit_room_form"):
-                c1, c2, c3 = st.columns(3)
-                n_name = c1.text_input("Room Name", value=str(row["room_name"]))
-                type_opts = ["CLASSROOM", "LAB"]
-                cur_type = str(row["room_type"])
-                t_idx = type_opts.index(cur_type) if cur_type in type_opts else 0
-                n_type = c2.selectbox("Room Type", type_opts, index=t_idx)
-                n_cap = c3.number_input("Capacity", 1, 300, int(row["capacity"]))
-
-                cs1, cs2 = st.columns(2)
-                save_btn = cs1.form_submit_button("💾 Save Changes")
-                cancel_btn = cs2.form_submit_button("❌ Cancel")
-
-                if save_btn:
-                    rooms_df.at[idx, "room_name"] = n_name.strip()
-                    rooms_df.at[idx, "room_type"] = n_type
-                    rooms_df.at[idx, "capacity"] = n_cap
+                nn = st.text_input("Name", str(row["room_name"]))
+                opts = ["CLASSROOM", "LAB"]
+                nt = st.selectbox("Type", opts, index=opts.index(str(row["room_type"])) if str(row["room_type"]) in opts else 0)
+                nc = st.number_input("Capacity", 1, 300, int(row["capacity"]))
+                s1, s2 = st.columns(2)
+                if s1.form_submit_button("💾 Save"):
+                    rooms_df.at[idx, "room_name"] = nn.strip()
+                    rooms_df.at[idx, "room_type"] = nt
+                    rooms_df.at[idx, "capacity"] = nc
                     save_csv(rooms_df, "rooms.csv")
                     st.session_state["edit_room_idx"] = None
-                    st.success("Room updated.")
+                    st.success("✅ Updated.")
                     st.rerun()
-
-                if cancel_btn:
+                if s2.form_submit_button("❌ Cancel"):
                     st.session_state["edit_room_idx"] = None
                     st.rerun()
 
-        # Table
-        header = st.columns([3, 2, 2, 1, 1])
-        header[0].markdown("**Room Name**")
-        header[1].markdown("**Type**")
-        header[2].markdown("**Capacity**")
-        header[3].markdown("**Edit**")
-        header[4].markdown("**Delete**")
+        h = st.columns([3, 2, 2, 1, 1])
+        for x, y in zip(h, ["**Name**", "**Type**", "**Capacity**", "**Edit**", "**Del**"]):
+            x.markdown(y)
 
-        for idx, row in rooms_df.iterrows():
-            col = st.columns([3, 2, 2, 1, 1])
-            col[0].write(row["room_name"])
-            col[1].write(row["room_type"])
-            col[2].write(int(row["capacity"]))
-
-            if col[3].button("✏️", key=f"edit_r_{idx}"):
-                st.session_state["edit_room_idx"] = idx
+        for i, r in rooms_df.iterrows():
+            c = st.columns([3, 2, 2, 1, 1])
+            c[0].write(r["room_name"])
+            c[1].write(r["room_type"])
+            c[2].write(int(r["capacity"]))
+            if c[3].button("✏️", key=f"er{i}"):
+                st.session_state["edit_room_idx"] = i
                 st.rerun()
-
-            if col[4].button("🗑️", key=f"del_r_{idx}"):
-                rooms_df = rooms_df.drop(index=idx).reset_index(drop=True)
+            if c[4].button("🗑️", key=f"dr{i}"):
+                rooms_df = rooms_df.drop(i).reset_index(drop=True)
                 save_csv(rooms_df, "rooms.csv")
-                st.success("Room deleted.")
+                st.success("✅ Deleted.")
                 st.rerun()
-
 
 # ==========================================
-# 15. TEACHER PREFERENCES PAGE (with Edit & Delete)
+# 16. TEACHER PREFERENCES
 # ==========================================
 elif page == "Teacher Preferences":
     st.title("⭐ Teacher Preferences")
-
     if teachers_df.empty or subjects_df.empty:
-        st.warning("Please add teachers and subjects first.")
+        st.warning("Add teachers & subjects first.")
     else:
-        # Add Form
-        with st.form("preference_form"):
+        with st.form("pref_form"):
+            sess = st.text_input("Session", "2025-26-even")
             c1, c2 = st.columns(2)
-            session_name = c1.text_input("Session Name", value="2025-26-even")
-            teacher_code = c2.selectbox(
-                "Teacher", teachers_df["teacher_code"].dropna().tolist()
-            )
-
-            c3, c4 = st.columns(2)
-            subject_code = c3.selectbox(
-                "Subject", subjects_df["subject_code"].dropna().tolist()
-            )
-            preference_order = c4.number_input(
-                "Preference Order (1 = Highest)", min_value=1, max_value=10, value=1
-            )
-
-            submitted = st.form_submit_button("Add Preference")
-            if submitted:
-                new_row = pd.DataFrame([{
-                    "session_name": session_name.strip(),
-                    "teacher_code": teacher_code,
-                    "subject_code": subject_code,
-                    "preference_order": int(preference_order)
-                }])
-                preferences_df = pd.concat(
-                    [preferences_df, new_row], ignore_index=True
-                )
-                save_csv(preferences_df, "preferences.csv")
-                st.success("Preference added successfully.")
-                st.rerun()
+            tc = c1.selectbox("Teacher", teachers_df["teacher_code"].dropna().tolist())
+            sc = c2.selectbox("Subject", subjects_df["subject_code"].dropna().tolist())
+            pref = st.number_input("Priority (1=Highest)", 1, 10, 1)
+            if st.form_submit_button("Add Preference"):
+                if is_duplicate_row(preferences_df, {
+                    "session_name": sess,
+                    "teacher_code": tc,
+                    "subject_code": sc
+                }):
+                    st.error("This preference already exists.")
+                else:
+                    preferences_df = pd.concat([
+                        preferences_df,
+                        pd.DataFrame([{
+                            "session_name": sess.strip(),
+                            "teacher_code": tc,
+                            "subject_code": sc,
+                            "preference_order": pref
+                        }])
+                    ], ignore_index=True)
+                    save_csv(preferences_df, "preferences.csv")
+                    st.success("✅ Added.")
+                    st.rerun()
 
     st.markdown("---")
     st.subheader("Preference List")
-
     if preferences_df.empty:
-        st.info("No preferences added yet.")
+        st.info("No preferences yet.")
     else:
-        # Edit Form
         if st.session_state["edit_pref_idx"] is not None:
             idx = st.session_state["edit_pref_idx"]
-            st.subheader(f"✏️ Editing Row {idx}")
             row = preferences_df.loc[idx]
-
             with st.form("edit_pref_form"):
+                ns = st.text_input("Session", str(row["session_name"]))
                 c1, c2 = st.columns(2)
-                n_sess = c1.text_input(
-                    "Session Name", value=str(row["session_name"])
-                )
-                tc_opts = teachers_df["teacher_code"].dropna().tolist()
-                cur_tc = str(row["teacher_code"])
-                tc_idx = tc_opts.index(cur_tc) if cur_tc in tc_opts else 0
-                n_tc = c2.selectbox("Teacher", tc_opts, index=tc_idx)
-
-                c3, c4 = st.columns(2)
-                sc_opts = subjects_df["subject_code"].dropna().tolist()
-                cur_sc = str(row["subject_code"])
-                sc_idx = sc_opts.index(cur_sc) if cur_sc in sc_opts else 0
-                n_sc = c3.selectbox("Subject", sc_opts, index=sc_idx)
-                n_pref = c4.number_input(
-                    "Preference Order", 1, 10, int(row["preference_order"])
-                )
-
-                cs1, cs2 = st.columns(2)
-                save_btn = cs1.form_submit_button("💾 Save Changes")
-                cancel_btn = cs2.form_submit_button("❌ Cancel")
-
-                if save_btn:
-                    preferences_df.at[idx, "session_name"] = n_sess.strip()
-                    preferences_df.at[idx, "teacher_code"] = n_tc
-                    preferences_df.at[idx, "subject_code"] = n_sc
-                    preferences_df.at[idx, "preference_order"] = n_pref
+                tco = teachers_df["teacher_code"].dropna().tolist()
+                sco = subjects_df["subject_code"].dropna().tolist()
+                ntc = c1.selectbox("Teacher", tco, index=tco.index(str(row["teacher_code"])) if str(row["teacher_code"]) in tco else 0)
+                nsc = c2.selectbox("Subject", sco, index=sco.index(str(row["subject_code"])) if str(row["subject_code"]) in sco else 0)
+                npref = st.number_input("Priority", 1, 10, int(row["preference_order"]))
+                s1, s2 = st.columns(2)
+                if s1.form_submit_button("💾 Save"):
+                    preferences_df.at[idx, "session_name"] = ns.strip()
+                    preferences_df.at[idx, "teacher_code"] = ntc
+                    preferences_df.at[idx, "subject_code"] = nsc
+                    preferences_df.at[idx, "preference_order"] = npref
                     save_csv(preferences_df, "preferences.csv")
                     st.session_state["edit_pref_idx"] = None
-                    st.success("Preference updated.")
+                    st.success("✅ Updated.")
                     st.rerun()
-
-                if cancel_btn:
+                if s2.form_submit_button("❌ Cancel"):
                     st.session_state["edit_pref_idx"] = None
                     st.rerun()
 
-        # Table
-        header = st.columns([2, 2, 2, 1, 1, 1])
-        header[0].markdown("**Session**")
-        header[1].markdown("**Teacher**")
-        header[2].markdown("**Subject**")
-        header[3].markdown("**Priority**")
-        header[4].markdown("**Edit**")
-        header[5].markdown("**Delete**")
+        h = st.columns([2, 2, 2, 1, 1, 1])
+        for x, y in zip(h, ["**Session**", "**Teacher**", "**Subject**", "**Priority**", "**Edit**", "**Del**"]):
+            x.markdown(y)
 
-        for idx, row in preferences_df.iterrows():
-            col = st.columns([2, 2, 2, 1, 1, 1])
-            col[0].write(row["session_name"])
-            col[1].write(row["teacher_code"])
-            col[2].write(row["subject_code"])
-            col[3].write(int(row["preference_order"]))
-
-            if col[4].button("✏️", key=f"edit_p_{idx}"):
-                st.session_state["edit_pref_idx"] = idx
+        for i, r in preferences_df.iterrows():
+            c = st.columns([2, 2, 2, 1, 1, 1])
+            c[0].write(r["session_name"])
+            c[1].write(r["teacher_code"])
+            c[2].write(r["subject_code"])
+            c[3].write(int(r["preference_order"]))
+            if c[4].button("✏️", key=f"ep{i}"):
+                st.session_state["edit_pref_idx"] = i
                 st.rerun()
-
-            if col[5].button("🗑️", key=f"del_p_{idx}"):
-                preferences_df = preferences_df.drop(
-                    index=idx
-                ).reset_index(drop=True)
+            if c[5].button("🗑️", key=f"dp{i}"):
+                preferences_df = preferences_df.drop(i).reset_index(drop=True)
                 save_csv(preferences_df, "preferences.csv")
-                st.success("Preference deleted.")
+                st.success("✅ Deleted.")
                 st.rerun()
-
 
 # ==========================================
-# 16. CLASS SUBJECT MAPPING PAGE (with Edit & Delete)
+# 17. CLASS SUBJECT MAPPING
 # ==========================================
 elif page == "Class Subject Mapping":
     st.title("🧩 Class Subject Mapping")
-
     if classes_df.empty or subjects_df.empty:
-        st.warning("Please add classes and subjects first.")
+        st.warning("Add classes & subjects first.")
     else:
-        # Add Form
-        with st.form("class_subject_form"):
-            session_name = st.text_input("Session Name", value="2025-26-even")
-
+        with st.form("cs_form"):
+            sess = st.text_input("Session", "2025-26-even")
             c1, c2, c3, c4 = st.columns(4)
-            batch_year = c1.selectbox(
-                "Batch Year",
-                sorted(classes_df["batch_year"].dropna().unique().tolist())
-            )
-            semester = c2.selectbox(
-                "Semester",
-                sorted(classes_df["semester"].dropna().unique().tolist())
-            )
-            section = c3.text_input("Section", value="A")
-            subject_code = c4.selectbox(
-                "Subject", subjects_df["subject_code"].dropna().tolist()
-            )
-
-            st.subheader("Weekly Hours Distribution (L-T-P)")
+            yr = c1.selectbox("Batch Year", sorted(classes_df["batch_year"].dropna().unique()))
+            sem = c2.selectbox("Semester", sorted(classes_df["semester"].dropna().unique()))
+            sec = c3.text_input("Section", "A")
+            sc = c4.selectbox("Subject", subjects_df["subject_code"].dropna().tolist())
             c5, c6, c7 = st.columns(3)
-            l_hours = c5.number_input(
-                "L (Lecture)", min_value=0, max_value=10, value=3
-            )
-            t_hours = c6.number_input(
-                "T (Tutorial)", min_value=0, max_value=10, value=0
-            )
-            p_hours = c7.number_input(
-                "P (Practical)", min_value=0, max_value=10, value=0
-            )
-
+            lh = c5.number_input("L", 0, 10, 3)
+            th = c6.number_input("T", 0, 10, 0)
+            ph = c7.number_input("P", 0, 10, 0)
             c8, c9 = st.columns(2)
-            is_lab = c8.checkbox("Is Lab", value=False)
-            lab_continuous_slots = c9.number_input(
-                "Lab Continuous Slots", min_value=1, max_value=4, value=2
-            )
-
-            elective_group = st.text_input(
-                "Elective / Open Elective Group (e.g. E1, OE1 — leave blank for normal subjects)",
-                value=""
-            )
-
-            submitted = st.form_submit_button("Add Mapping")
-            if submitted:
-                new_row = pd.DataFrame([{
-                    "session_name": session_name.strip(),
-                    "batch_year": int(batch_year),
-                    "semester": int(semester),
-                    "section": section.strip(),
-                    "subject_code": subject_code,
-                    "l_hours": int(l_hours),
-                    "t_hours": int(t_hours),
-                    "p_hours": int(p_hours),
-                    "is_lab": is_lab,
-                    "lab_continuous_slots": int(lab_continuous_slots),
-                    "elective_group": elective_group.strip()
-                }])
-                class_subjects_df = pd.concat(
-                    [class_subjects_df, new_row], ignore_index=True
-                )
-                save_csv(class_subjects_df, "class_subjects.csv")
-                st.success("Class-subject mapping added successfully.")
-                st.rerun()
+            islab = c8.checkbox("Is Lab")
+            lslots = c9.number_input("Lab Slots", 1, 4, 2)
+            eg = st.text_input("Elective Group (leave blank for normal)", "")
+            if st.form_submit_button("Add Mapping"):
+                if not sess or not sec or not sc:
+                    st.error("Session, Section & Subject required.")
+                elif is_duplicate_row(class_subjects_df, {
+                    "session_name": sess,
+                    "batch_year": yr,
+                    "semester": sem,
+                    "section": sec,
+                    "subject_code": sc
+                }):
+                    st.error("This class-subject mapping already exists.")
+                else:
+                    class_subjects_df = pd.concat([
+                        class_subjects_df,
+                        pd.DataFrame([{
+                            "session_name": sess.strip(),
+                            "batch_year": yr,
+                            "semester": sem,
+                            "section": sec.strip(),
+                            "subject_code": sc,
+                            "l_hours": lh,
+                            "t_hours": th,
+                            "p_hours": ph,
+                            "is_lab": islab,
+                            "lab_continuous_slots": lslots,
+                            "elective_group": eg.strip()
+                        }])
+                    ], ignore_index=True)
+                    save_csv(class_subjects_df, "class_subjects.csv")
+                    st.success("✅ Added.")
+                    st.rerun()
 
     st.markdown("---")
-    st.subheader("Class Subject Mappings")
-
+    st.subheader("Mappings")
     if class_subjects_df.empty:
-        st.info("No mappings added yet.")
+        st.info("No mappings yet.")
     else:
-        # Edit Form
         if st.session_state["edit_cs_idx"] is not None:
             idx = st.session_state["edit_cs_idx"]
-            st.subheader(f"✏️ Editing Row {idx}")
             row = class_subjects_df.loc[idx]
-
             with st.form("edit_cs_form"):
-                n_sess = st.text_input(
-                    "Session Name", value=str(row["session_name"])
-                )
-
+                ns = st.text_input("Session", str(row["session_name"]))
                 c1, c2, c3, c4 = st.columns(4)
-                n_yr = c1.number_input(
-                    "Batch Year", 2020, 2035, int(row["batch_year"])
-                )
-                n_sem = c2.number_input("Semester", 1, 8, int(row["semester"]))
-                n_sec = c3.text_input("Section", value=str(row["section"]))
-                sc_opts = subjects_df["subject_code"].dropna().tolist()
-                cur_sc = str(row["subject_code"])
-                sc_i = sc_opts.index(cur_sc) if cur_sc in sc_opts else 0
-                n_sc = c4.selectbox("Subject", sc_opts, index=sc_i)
-
-                st.subheader("Weekly Hours (L-T-P)")
+                ny = c1.number_input("Year", 2020, 2035, int(row["batch_year"]))
+                nsem = c2.number_input("Sem", 1, 8, int(row["semester"]))
+                nsec = c3.text_input("Section", str(row["section"]))
+                sco = subjects_df["subject_code"].dropna().tolist()
+                nsc = c4.selectbox("Subject", sco, index=sco.index(str(row["subject_code"])) if str(row["subject_code"]) in sco else 0)
                 c5, c6, c7 = st.columns(3)
-                n_l = c5.number_input("L", 0, 10, int(row["l_hours"]))
-                n_t = c6.number_input("T", 0, 10, int(row["t_hours"]))
-                n_p = c7.number_input("P", 0, 10, int(row["p_hours"]))
-
+                nl = c5.number_input("L", 0, 10, int(row["l_hours"]))
+                ntv = c6.number_input("T", 0, 10, int(row["t_hours"]))
+                npv = c7.number_input("P", 0, 10, int(row["p_hours"]))
                 c8, c9 = st.columns(2)
-                n_islab = c8.checkbox("Is Lab", value=bool(row["is_lab"]))
-                n_cont = c9.number_input(
-                    "Continuous Slots", 1, 4, int(row["lab_continuous_slots"])
-                )
-                n_eg = st.text_input(
-                    "Elective Group", value=str(row["elective_group"])
-                    if pd.notna(row["elective_group"]) else ""
-                )
-
-                cs1, cs2 = st.columns(2)
-                save_btn = cs1.form_submit_button("💾 Save Changes")
-                cancel_btn = cs2.form_submit_button("❌ Cancel")
-
-                if save_btn:
-                    class_subjects_df.at[idx, "session_name"] = n_sess.strip()
-                    class_subjects_df.at[idx, "batch_year"] = n_yr
-                    class_subjects_df.at[idx, "semester"] = n_sem
-                    class_subjects_df.at[idx, "section"] = n_sec.strip()
-                    class_subjects_df.at[idx, "subject_code"] = n_sc
-                    class_subjects_df.at[idx, "l_hours"] = n_l
-                    class_subjects_df.at[idx, "t_hours"] = n_t
-                    class_subjects_df.at[idx, "p_hours"] = n_p
-                    class_subjects_df.at[idx, "is_lab"] = n_islab
-                    class_subjects_df.at[idx, "lab_continuous_slots"] = n_cont
-                    class_subjects_df.at[idx, "elective_group"] = n_eg.strip()
+                nil = c8.checkbox("Is Lab", bool(row["is_lab"]))
+                nls = c9.number_input("Slots", 1, 4, int(row["lab_continuous_slots"]))
+                neg = st.text_input("Elective Group", str(row["elective_group"]) if pd.notna(row["elective_group"]) else "")
+                s1, s2 = st.columns(2)
+                if s1.form_submit_button("💾 Save"):
+                    class_subjects_df.at[idx, "session_name"] = ns.strip()
+                    class_subjects_df.at[idx, "batch_year"] = ny
+                    class_subjects_df.at[idx, "semester"] = nsem
+                    class_subjects_df.at[idx, "section"] = nsec.strip()
+                    class_subjects_df.at[idx, "subject_code"] = nsc
+                    class_subjects_df.at[idx, "l_hours"] = nl
+                    class_subjects_df.at[idx, "t_hours"] = ntv
+                    class_subjects_df.at[idx, "p_hours"] = npv
+                    class_subjects_df.at[idx, "is_lab"] = nil
+                    class_subjects_df.at[idx, "lab_continuous_slots"] = nls
+                    class_subjects_df.at[idx, "elective_group"] = neg.strip()
                     save_csv(class_subjects_df, "class_subjects.csv")
                     st.session_state["edit_cs_idx"] = None
-                    st.success("Mapping updated.")
+                    st.success("✅ Updated.")
                     st.rerun()
-
-                if cancel_btn:
+                if s2.form_submit_button("❌ Cancel"):
                     st.session_state["edit_cs_idx"] = None
                     st.rerun()
 
-        # Table with total hours
-        temp_df = class_subjects_df.copy()
-        temp_df["total"] = (
-            temp_df["l_hours"].fillna(0).astype(int)
-            + temp_df["t_hours"].fillna(0).astype(int)
-            + temp_df["p_hours"].fillna(0).astype(int)
+        temp = class_subjects_df.copy()
+        temp["total"] = (
+            temp["l_hours"].fillna(0).astype(int)
+            + temp["t_hours"].fillna(0).astype(int)
+            + temp["p_hours"].fillna(0).astype(int)
         )
+        h = st.columns([2, 1, 1, 1, 2, 1, 1, 1, 2, 1, 1])
+        for x, y in zip(h, ["**Session**", "**Sem**", "**Sec**", "**Subject**", "**L-T-P**", "**Total**", "**Lab**", "**Slots**", "**Elective**", "**Edit**", "**Del**"]):
+            x.markdown(y)
 
-        header = st.columns([2, 1, 1, 1, 2, 1, 1, 1, 2, 1, 1, 1])
-        header[0].markdown("**Session**")
-        header[1].markdown("**Sem**")
-        header[2].markdown("**Sec**")
-        header[3].markdown("**Subject**")
-        header[4].markdown("**L-T-P**")
-        header[5].markdown("**Total**")
-        header[6].markdown("**Lab**")
-        header[7].markdown("**Slots**")
-        header[8].markdown("**Elective Grp**")
-        header[9].markdown("**Edit**")
-        header[10].markdown("**Del**")
-
-        for idx, row in temp_df.iterrows():
-            col = st.columns([2, 1, 1, 1, 2, 1, 1, 1, 2, 1, 1])
-            col[0].write(row["session_name"])
-            col[1].write(int(row["semester"]))
-            col[2].write(row["section"])
-            col[3].write(row["subject_code"])
-            col[4].write(
-                f"{int(row['l_hours'])}-{int(row['t_hours'])}-{int(row['p_hours'])}"
-            )
-            col[5].write(int(row["total"]))
-            col[6].write("✅" if row["is_lab"] else "❌")
-            col[7].write(int(row["lab_continuous_slots"]))
-            col[8].write(
-                str(row["elective_group"])
-                if pd.notna(row["elective_group"]) else "-"
-            )
-
-            if col[9].button("✏️", key=f"edit_cs_{idx}"):
-                st.session_state["edit_cs_idx"] = idx
+        for i, r in temp.iterrows():
+            c = st.columns([2, 1, 1, 1, 2, 1, 1, 1, 2, 1, 1])
+            c[0].write(r["session_name"])
+            c[1].write(int(r["semester"]))
+            c[2].write(r["section"])
+            c[3].write(r["subject_code"])
+            c[4].write(f"{int(r['l_hours'])}-{int(r['t_hours'])}-{int(r['p_hours'])}")
+            c[5].write(int(r["total"]))
+            c[6].write("✅" if bool(r["is_lab"]) else "❌")
+            c[7].write(int(r["lab_continuous_slots"]))
+            c[8].write(str(r["elective_group"]) if pd.notna(r["elective_group"]) and str(r["elective_group"]).strip() != "" else "-")
+            if c[9].button("✏️", key=f"ecs{i}"):
+                st.session_state["edit_cs_idx"] = i
                 st.rerun()
-
-            if col[10].button("🗑️", key=f"del_cs_{idx}"):
-                class_subjects_df = class_subjects_df.drop(
-                    index=idx
-                ).reset_index(drop=True)
+            if c[10].button("🗑️", key=f"dcs{i}"):
+                class_subjects_df = class_subjects_df.drop(i).reset_index(drop=True)
                 save_csv(class_subjects_df, "class_subjects.csv")
-                st.success("Mapping deleted.")
+                st.success("✅ Deleted.")
                 st.rerun()
